@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Validation Helpers
+    function isValidAnalysis(data) {
+      return data.keys().hasAll(['condition', 'probability', 'recommendation', 'severity']) &&
+             data.keys().size() <= 5 &&
+             data.condition is string && data.condition.size() <= 200 &&
+             data.probability is number &&
+             data.recommendation is string && data.recommendation.size() <= 2000 &&
+             data.severity in ['Low', 'Moderate', 'High', 'Critical'];
+    }
+
+    function isValidHistoryItem(data) {
+      return data.keys().hasAll(['id', 'image', 'analysis', 'timestamp', 'skinTone', 'userId']) &&
+             data.keys().size() <= 7 &&
+             isValidId(data.id) &&
+             data.image is string && data.image.size() <= 1048576 && // 1MB limit for base64
+             isValidAnalysis(data.analysis) &&
+             data.timestamp is string &&
+             data.skinTone is int &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidCommunityAlert(data) {
+      return data.keys().hasAll(['id', 'condition', 'location', 'severity', 'timestamp']) &&
+             data.keys().size() == 5 &&
+             isValidId(data.id) &&
+             data.condition is string && data.condition.size() <= 200 &&
+             data.location is string && data.location.size() <= 200 &&
+             data.severity in ['Low', 'Moderate', 'High', 'Critical'] &&
+             data.timestamp is string;
+    }
+
+    // Collection: History
+    match /users/{userId}/history/{historyId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(historyId);
+      allow create: if isOwner(userId) && isValidId(historyId) && isValidHistoryItem(incoming());
+      allow delete: if isOwner(userId) && isValidId(historyId);
+      allow update: if false;
+    }
+
+    // Collection: Alerts
+    match /alerts/{alertId} {
+      allow list: if true;
+      allow get: if true;
+      allow create: if isValidId(alertId) && isValidCommunityAlert(incoming());
+      allow update, delete: if false;
+    }
+  }
+}
