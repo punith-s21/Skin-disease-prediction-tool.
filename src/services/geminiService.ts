@@ -1,9 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { Analysis, Severity, Language } from "../types";
 
-// Always initialize with an empty string if undefined; 
-// however, the platform injects this for you in the standard turn.
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+// Support both platform-injected keys and standard Vite environment variables for local/external hosting
+const API_KEY = process.env.GEMINI_API_KEY || (import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
+
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export async function analyzeSkinCondition(
   imageData: string, 
