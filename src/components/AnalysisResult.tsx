@@ -162,9 +162,9 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
           </div>
 
           <div className="flex items-start space-x-3 pt-6 border-t border-clinical-border">
-            <AlertTriangle className="text-orange-500 mt-0.5 flex-shrink-0" size={16} />
-            <p className="text-[10px] leading-relaxed text-clinical-text/40 font-medium italic">
-              AI Insight only. This assessment is generated for rural field workers by bias-aware models and does not substitute a licensed dermatologist's review.
+            <AlertTriangle className="text-red-500 mt-0.5 flex-shrink-0" size={16} />
+            <p className="text-[10px] leading-relaxed text-red-600/60 font-bold uppercase tracking-tight">
+              ETHICAL DISCLAIMER (MANDATORY): This system is for educational and research purposes only. It is not a medical diagnostic tool. Please consult a qualified healthcare professional.
             </p>
           </div>
         </div>

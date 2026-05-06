@@ -39,7 +39,8 @@ export async function analyzeSkinCondition(
       "probability": number (0-1),
       "recommendation": string (Markdown format in ${language}),
       "severity": "Low" | "Moderate" | "High" | "Critical",
-      "localization": string (Name in ${language} if different from English, otherwise empty)
+      "localization": string (Name in ${language} if different from English, otherwise empty),
+      "features": string[] (List 5-7 key clinical features observed in the image, e.g., "Well-defined borders", "Asymmetric pattern", "Presence of scales")
     }
   `;
 
@@ -64,7 +65,8 @@ export async function analyzeSkinCondition(
       probability: result.probability || 0,
       recommendation: result.recommendation || "Maintain hygiene and consult a professional.",
       severity: (result.severity as Severity) || Severity.MODERATE,
-      localization: result.localization || ""
+      localization: result.localization || "",
+      features: result.features || []
     };
   } catch (error) {
     console.error("Frontend AI Analysis failed:", error);

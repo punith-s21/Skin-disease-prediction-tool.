@@ -21,6 +21,7 @@ export interface Analysis {
   recommendation: string;
   severity: Severity;
   localization?: string; // Hindi/Local name
+  features?: string[]; // Top clinical features observed
 }
 
 export interface CommunityAlert {

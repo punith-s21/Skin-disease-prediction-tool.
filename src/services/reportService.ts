@@ -54,9 +54,9 @@ export async function generatePDFReport(
   y += 15;
   try {
     // Add captured image
-    // We assume image is a dataURL
-    doc.addImage(image, 'JPEG', margin, y, 80, 80);
-    y += 90;
+    // Smaller image size for better report layout
+    doc.addImage(image, 'JPEG', margin, y, 60, 60);
+    y += 70;
   } catch (e) {
     console.error("Error adding image to PDF", e);
     y += 10;
@@ -78,16 +78,19 @@ export async function generatePDFReport(
   doc.text(lines, margin, y);
 
   // Footer
-  doc.setFontSize(8);
-  doc.setTextColor(100);
-  const footerY = doc.internal.pageSize.getHeight() - 25;
+  doc.setFontSize(9);
+  doc.setTextColor(220, 38, 38); // Red color for urgency
+  doc.setFont("helvetica", "bold");
+  const footerY = doc.internal.pageSize.getHeight() - 30;
   
   const ethicalDisclaimer = "ETHICAL DISCLAIMER (MANDATORY): This system is for educational and research purposes only. It is not a medical diagnostic tool. Please consult a qualified healthcare professional.";
   const wrappedEthical = doc.splitTextToSize(ethicalDisclaimer, pageWidth - (margin * 2));
   doc.text(wrappedEthical, margin, footerY);
 
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
   doc.setTextColor(150);
-  doc.text("Clinical Warning: This is an AI-assisted analysis and should be verified by a board-certified dermatologist.", margin, footerY + 10);
+  doc.text("Clinical Warning: This is an AI-assisted analysis and should be verified by a board-certified dermatologist.", margin, footerY + 12);
 
   // Save the PDF
   const filename = `Dermal_Report_${analysis.condition.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`;
