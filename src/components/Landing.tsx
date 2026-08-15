@@ -1,26 +1,33 @@
 import React from 'react';
-import { Leaf, ChevronRight, Shield, Mic, Activity, Globe, LogIn, LogOut, User } from 'lucide-react';
+import { Leaf, ChevronRight, Shield, Mic, Activity, Globe, LogIn, LogOut, User, Stethoscope, Lock, BarChart3 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import { User as FirebaseUser } from 'firebase/auth';
+import { AppUserSession } from '../lib/firebase';
 
 interface LandingProps {
   onStartScanner: () => void;
   onViewRadar: () => void;
+  onOpenAdmin: () => void;
+  onOpenUserLogin: () => void;
+  onOpenAdminLogin: () => void;
   selectedLanguage: string;
   onLanguageChange: (lang: string) => void;
   user: FirebaseUser | null;
-  onSignIn: () => void;
+  userSession: AppUserSession | null;
   onSignOut: () => void;
 }
 
 export const Landing: React.FC<LandingProps> = ({ 
   onStartScanner, 
   onViewRadar,
+  onOpenAdmin,
+  onOpenUserLogin,
+  onOpenAdminLogin,
   selectedLanguage,
   onLanguageChange,
   user,
-  onSignIn,
+  userSession,
   onSignOut
 }) => {
   const languages = [
@@ -44,43 +51,79 @@ export const Landing: React.FC<LandingProps> = ({
   };
 
   const currentLabels = translations[selectedLanguage] || translations['en-IN'];
+  const userRole = userSession?.role || 'Clinic Worker';
+  const isAdmin = userRole === 'Admin';
 
   return (
     <div className="min-h-screen medical-grid pt-12 pb-24 px-6 max-w-5xl mx-auto">
       <header className="flex items-center justify-between mb-16">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-3">
           <div className="w-10 h-10 bg-clinical-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-clinical-primary/20">
             <Leaf size={24} />
           </div>
-          <span className="text-2xl font-black tracking-tighter text-clinical-text">DermAl</span>
+          <div>
+            <span className="text-2xl font-black tracking-tighter text-clinical-text leading-none block">DermAl</span>
+            <span className="text-[10px] font-bold text-clinical-text/40 tracking-wider uppercase">Clinical AI</span>
+          </div>
         </div>
-        <div className="flex items-center space-x-4">
+
+        {/* Auth & Navigation Actions */}
+        <div className="flex items-center space-x-2 sm:space-x-3">
           {user ? (
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-3 bg-white px-3.5 py-1.5 rounded-2xl border border-clinical-border shadow-sm">
               <div className="text-right hidden sm:block">
-                <div className="text-[10px] font-bold text-clinical-text/40 uppercase tracking-widest">Clinic Worker</div>
-                <div className="text-xs font-bold text-clinical-text">{user.displayName || "Dr. Field"}</div>
+                <div className="flex items-center space-x-1 justify-end">
+                  <span className={cn(
+                    "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md",
+                    isAdmin ? "bg-teal-900 text-white" : "bg-clinical-primary/10 text-clinical-primary"
+                  )}>
+                    {userRole}
+                  </span>
+                </div>
+                <div className="text-xs font-bold text-clinical-text mt-0.5 truncate max-w-[140px]">
+                  {userSession?.displayName || user.displayName || user.email || "Worker"}
+                </div>
               </div>
+
+              {isAdmin && (
+                <button
+                  onClick={onOpenAdmin}
+                  className="bg-teal-900 hover:bg-teal-800 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center space-x-1"
+                >
+                  <Shield size={13} />
+                  <span className="hidden md:inline">Admin Panel</span>
+                </button>
+              )}
+
               <button 
                 onClick={onSignOut}
-                className="w-10 h-10 rounded-xl bg-clinical-surface border border-clinical-border flex items-center justify-center text-clinical-text/40 hover:text-red-500 transition-colors"
+                className="w-8 h-8 rounded-xl bg-slate-50 hover:bg-red-50 text-slate-400 hover:text-red-500 border border-slate-200 flex items-center justify-center transition-colors"
                 title="Sign out"
               >
-                <LogOut size={20} />
+                <LogOut size={16} />
               </button>
             </div>
           ) : (
-            <button 
-              onClick={onSignIn}
-              className="flex items-center space-x-2 bg-clinical-primary/10 text-clinical-primary px-4 py-2 rounded-xl text-xs font-bold hover:bg-clinical-primary hover:text-white transition-all shadow-sm"
-            >
-              <LogIn size={16} />
-              <span>Sign in for centralized storage</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              {/* Separate User Login */}
+              <button 
+                onClick={onOpenUserLogin}
+                className="flex items-center space-x-1.5 bg-clinical-primary/10 text-clinical-primary border border-clinical-primary/20 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold hover:bg-clinical-primary hover:text-white transition-all shadow-sm"
+              >
+                <Stethoscope size={15} />
+                <span>User Login</span>
+              </button>
+
+              {/* Separate Admin Login */}
+              <button
+                onClick={onOpenAdminLogin}
+                className="flex items-center space-x-1.5 bg-teal-900 hover:bg-teal-800 text-white px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm"
+              >
+                <Shield size={15} />
+                <span>Admin Login</span>
+              </button>
+            </div>
           )}
-          <div className="text-[10px] font-bold tracking-[0.2em] text-clinical-primary/40 uppercase hidden md:block">
-            V1 • Field Build
-          </div>
         </div>
       </header>
 
@@ -121,22 +164,30 @@ export const Landing: React.FC<LandingProps> = ({
           </div>
         </div>
 
-
-        <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           <button 
             onClick={onStartScanner}
-            className="flex-1 bg-clinical-primary text-white py-6 rounded-full text-lg font-bold flex items-center justify-center space-x-3 active:scale-95 transition-all shadow-xl shadow-clinical-primary/20"
+            className="bg-clinical-primary text-white py-6 rounded-full text-base font-bold flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-xl shadow-clinical-primary/20 cursor-pointer"
           >
-            <Activity size={24} />
+            <Activity size={20} />
             <span>{currentLabels.start}</span>
-            <ChevronRight size={24} />
+            <ChevronRight size={20} />
           </button>
           <button 
             onClick={onViewRadar}
-            className="flex-1 bg-white border border-clinical-primary/20 text-clinical-primary py-6 rounded-full text-lg font-bold flex items-center justify-center space-x-3 active:scale-95 transition-all"
+            className="bg-white border border-clinical-primary/20 text-clinical-primary py-6 rounded-full text-base font-bold flex items-center justify-center space-x-2 active:scale-95 transition-all cursor-pointer"
           >
             <span>{currentLabels.radar}</span>
           </button>
+          {isAdmin && (
+            <button 
+              onClick={onOpenAdmin}
+              className="sm:col-span-2 bg-teal-900 text-white py-4 rounded-full text-sm font-bold flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-lg shadow-teal-900/20 cursor-pointer"
+            >
+              <Shield size={18} />
+              <span>Enter Admin Surveillance Portal</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -204,6 +255,17 @@ export const Landing: React.FC<LandingProps> = ({
               </span>
             ))}
           </div>
+        </div>
+
+        <div className="pt-4 flex items-center justify-between text-xs text-slate-400 px-4">
+          <span>DermAI v2.4 · Clinical Field Edition</span>
+          <button
+            onClick={onOpenAdminLogin}
+            className="text-slate-400 hover:text-teal-900 font-medium transition-colors flex items-center space-x-1 cursor-pointer"
+          >
+            <Shield size={12} />
+            <span>Authorized Admin Access</span>
+          </button>
         </div>
       </div>
     </div>

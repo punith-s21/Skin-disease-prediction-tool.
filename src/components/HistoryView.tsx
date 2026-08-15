@@ -33,12 +33,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ items, onSelectItem, o
         
         {items.length > 0 && (
           <button 
+            type="button"
             onClick={() => {
-              if (confirm("Permanently clear all local history?")) onClearHistory();
+              if (window.confirm("Are you sure you want to permanently clear all patient scan history? This action cannot be undone.")) {
+                onClearHistory();
+              }
             }}
-            className="p-4 rounded-2xl border border-red-100 text-red-500 hover:bg-red-50 transition-colors"
+            className="flex items-center space-x-2 px-4 py-3 rounded-2xl border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 hover:border-red-300 transition-all text-xs font-bold shadow-2xs cursor-pointer active:scale-95"
+            title="Permanently clear all scan history"
           >
-            <Trash2 size={20} />
+            <Trash2 size={16} />
+            <span>Clear All History</span>
           </button>
         )}
       </div>

@@ -40,6 +40,35 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "condition", "location", "severity", "timestamp"]
+    },
+    "PredictionLog": {
+      "title": "PredictionLog",
+      "description": "A log entry recording an AI inference prediction event for system usage analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "condition": { "type": "string" },
+        "probability": { "type": "number" },
+        "severity": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "skinTone": { "type": "integer" }
+      },
+      "required": ["id", "userId", "condition", "probability", "severity", "timestamp"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User registration and account details for admin management.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "registeredAt": { "type": "string", "format": "date-time" },
+        "lastLoginAt": { "type": "string", "format": "date-time" },
+        "predictionsCount": { "type": "integer" }
+      },
+      "required": ["id", "email", "registeredAt"]
     }
   },
   "firestore": {
@@ -50,6 +79,14 @@
     "alerts/{alertId}": {
       "schema": "CommunityAlert",
       "description": "Public community alerts for disease surveillance."
+    },
+    "predictions/{predictionId}": {
+      "schema": "PredictionLog",
+      "description": "System-wide prediction logs for application usage analytics."
+    },
+    "user_profiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "Registered user accounts for admin user management."
     }
   }
 }

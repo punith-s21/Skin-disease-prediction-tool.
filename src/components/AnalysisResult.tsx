@@ -1,5 +1,5 @@
-import React from 'react';
-import { AlertTriangle, CheckCircle, Info, ArrowRight, Activity, Shield, Users, Volume2, FileDown } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { AlertTriangle, CheckCircle, Info, ArrowRight, Activity, Shield, Users, Volume2, VolumeX, Square, FileDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Analysis, Severity } from '../types';
 import { cn } from '../lib/utils';
@@ -24,16 +24,23 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
 }) => {
   const [isSpeaking, setIsSpeaking] = React.useState(false);
 
-  const speak = () => {
+  // Clean up any speech on unmount
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const startSound = () => {
     if ('speechSynthesis' in window) {
-      // Cancel any ongoing speech
       window.speechSynthesis.cancel();
 
-      const utterance = new SpeechSynthesisUtterance(
-        `${analysis.condition}. ${analysis.recommendation.replace(/[#*`]/g, '')}`
-      );
+      const cleanText = `${analysis.condition}. ${analysis.recommendation.replace(/[#*`_>~-]/g, '')}`;
+      const utterance = new SpeechSynthesisUtterance(cleanText);
       
-      utterance.lang = language;
+      utterance.lang = language || 'en-US';
       
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onend = () => setIsSpeaking(false);
@@ -41,7 +48,22 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
 
       window.speechSynthesis.speak(utterance);
     } else {
-      alert("Speech synthesis not supported in this browser.");
+      alert("Speech synthesis is not supported in this browser.");
+    }
+  };
+
+  const stopSound = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  };
+
+  const toggleSound = () => {
+    if (isSpeaking) {
+      stopSound();
+    } else {
+      startSound();
     }
   };
 
@@ -60,7 +82,9 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
       await generatePDFReport(
         analysis, 
         image, 
-        auth.currentUser?.displayName || "Anonymous Patient"
+        auth.currentUser?.displayName || "Anonymous Patient",
+        new Date().toLocaleString(),
+        language
       );
     } catch (err) {
       console.error("PDF Export failed", err);
@@ -114,22 +138,45 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
 
           <div className="space-y-6 flex-1">
             <div className="bg-clinical-bg rounded-3xl p-6 border border-clinical-border relative">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <div className="flex items-center space-x-2 text-clinical-primary/60">
                   <Info size={16} />
                   <h4 className="text-[10px] font-extrabold uppercase tracking-widest leading-none pt-0.5">Primary Recommendation</h4>
                 </div>
-                <button 
-                  onClick={speak}
-                  className={cn(
-                    "p-3 rounded-xl border transition-all active:scale-95",
-                    isSpeaking 
-                      ? "bg-clinical-primary text-white border-clinical-primary shadow-lg shadow-clinical-primary/20 animate-pulse" 
-                      : "bg-white text-clinical-primary border-clinical-border hover:border-clinical-primary/40"
-                  )}
-                >
-                  <Volume2 size={16} />
-                </button>
+                
+                {/* Sound Controls: Sound On and Stop */}
+                <div className="flex items-center bg-white border border-clinical-border rounded-xl p-1 shadow-2xs space-x-1">
+                  <button 
+                    type="button"
+                    onClick={startSound}
+                    className={cn(
+                      "flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer",
+                      isSpeaking 
+                        ? "bg-clinical-primary text-white shadow-sm shadow-clinical-primary/25 ring-2 ring-clinical-primary/30" 
+                        : "text-clinical-primary bg-clinical-primary/5 hover:bg-clinical-primary/10"
+                    )}
+                    title="Turn Sound On (Listen to recommendation)"
+                  >
+                    <Volume2 size={14} className={isSpeaking ? "animate-pulse" : ""} />
+                    <span>Sound On</span>
+                  </button>
+
+                  <button 
+                    type="button"
+                    onClick={stopSound}
+                    disabled={!isSpeaking}
+                    className={cn(
+                      "flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer",
+                      isSpeaking 
+                        ? "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 shadow-2xs" 
+                        : "text-slate-400 opacity-60 hover:opacity-100 hover:bg-slate-100"
+                    )}
+                    title="Stop audio narration"
+                  >
+                    <VolumeX size={14} />
+                    <span>Stop</span>
+                  </button>
+                </div>
               </div>
               <div className="text-clinical-text/70 text-sm leading-relaxed prose prose-sm max-w-none prose-p:mb-2 last:prose-p:mb-0">
                 <ReactMarkdown>{analysis.recommendation}</ReactMarkdown>

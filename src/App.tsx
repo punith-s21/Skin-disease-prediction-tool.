@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Activity, Radar, ArrowLeft, Menu, Settings, User, Languages, Leaf, Clock, Users, ChevronRight, ScanLine, LogIn, LogOut } from 'lucide-react';
+import { Shield, Activity, Radar, ArrowLeft, Menu, Settings, User, Languages, Leaf, Clock, Users, ChevronRight, ScanLine, LogIn, LogOut, BarChart2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CameraCapture } from './components/CameraCapture';
 import { VoiceInterface } from './components/VoiceInterface';
@@ -7,12 +7,15 @@ import { AnalysisResult } from './components/AnalysisResult';
 import { CommunityRadar } from './components/CommunityRadar';
 import { SkinTonePicker, SkinTone } from './components/SkinTonePicker';
 import { Landing } from './components/Landing';
+import { AdminAnalytics } from './components/AdminAnalytics';
 import { analyzeSkinCondition } from './services/geminiService';
 import { initEnsemble } from './services/modelService';
 import { Analysis, Severity, HistoryItem, Language } from './types';
 import { cn } from './lib/utils';
 import { HistoryView } from './components/HistoryView';
-import { auth, signIn, db } from './lib/firebase';
+import { AuthModal } from './components/AuthModal';
+import { EntryLogin } from './components/EntryLogin';
+import { auth, signIn, db, getActiveUserSession, setActiveUserSession, signOutUser, AppUserSession } from './lib/firebase';
 import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, setDoc, doc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firestoreUtils';
@@ -28,7 +31,17 @@ const LOCALE_TO_LANGUAGE: Record<string, Language> = {
 };
 
 export default function App() {
-  const [view, setView] = useState<'landing' | 'scanner' | 'radar' | 'history'>('landing');
+  // Determine initial view: check admin route, active session or login gate
+  const getInitialView = (): 'login' | 'landing' | 'scanner' | 'radar' | 'history' | 'admin' => {
+    if (window.location.pathname.startsWith('/admin')) return 'admin';
+    const active = getActiveUserSession();
+    if (active || localStorage.getItem('dermal_guest_entered') === 'true') {
+      return 'landing';
+    }
+    return 'login';
+  };
+
+  const [view, setView] = useState<'login' | 'landing' | 'scanner' | 'radar' | 'history' | 'admin'>(getInitialView);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [voiceDescription, setVoiceDescription] = useState("");
   const [skinTone, setSkinTone] = useState<SkinTone>(5);
@@ -37,14 +50,106 @@ export default function App() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [isTfReady, setIsTfReady] = useState(false);
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [userSession, setUserSession] = useState<AppUserSession | null>(getActiveUserSession);
+
+  // Auth modal management
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'user' | 'admin'>('user');
+
+  const openAuthModal = (mode: 'user' | 'admin') => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  // Sync window URL path when switching views
+  const changeView = (newView: 'login' | 'landing' | 'scanner' | 'radar' | 'history' | 'admin') => {
+    setView(newView);
+    if (newView === 'admin') {
+      window.history.pushState({}, '', '/admin/analytics');
+    } else if (newView === 'login') {
+      window.history.pushState({}, '', '/login');
+    } else if (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/login')) {
+      window.history.pushState({}, '', '/');
+    }
+  };
 
   useEffect(() => {
     initEnsemble().then(success => setIsTfReady(success));
     
-    const unsubscribe = onAuthStateChanged(auth, (authUser) => {
-      setUser(authUser);
+    const checkLocalSession = () => {
+      const active = getActiveUserSession();
+      setUserSession(active);
+      if (active) {
+        return {
+          uid: active.uid,
+          email: active.email,
+          displayName: active.displayName,
+          emailVerified: true
+        } as FirebaseUser;
+      }
+      return null;
+    };
+
+    const initialSessionUser = checkLocalSession();
+    if (initialSessionUser) {
+      setUser(initialSessionUser);
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+      if (authUser) {
+        setUser(authUser);
+        const currentSession = getActiveUserSession();
+        const role = currentSession?.role || 'Clinic Worker';
+        const session: AppUserSession = {
+          uid: authUser.uid,
+          email: authUser.email || 'worker@clinic.gov.in',
+          displayName: authUser.displayName || 'Clinic Worker',
+          role: role
+        };
+        setActiveUserSession(session);
+        setUserSession(session);
+
+        // Sync user profile to Firestore user_profiles collection
+        try {
+          const userRef = doc(db, 'user_profiles', authUser.uid);
+          await setDoc(userRef, {
+            id: authUser.uid,
+            email: authUser.email || 'worker@clinic.gov.in',
+            displayName: authUser.displayName || 'Clinic Worker',
+            registeredAt: authUser.metadata.creationTime ? new Date(authUser.metadata.creationTime).toISOString() : new Date().toISOString(),
+            lastLoginAt: new Date().toISOString(),
+            role: role
+          }, { merge: true });
+        } catch (e) {
+          console.warn('User profile sync note:', e);
+        }
+      } else {
+        const localUser = checkLocalSession();
+        setUser(localUser);
+      }
     });
-    return () => unsubscribe();
+
+    const handleStorageChange = () => {
+      const localUser = checkLocalSession();
+      setUser(localUser);
+      const saved = localStorage.getItem('dermal_history');
+      setHistory(saved ? JSON.parse(saved) : []);
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    // Listen for browser popstate
+    const handlePopState = () => {
+      if (window.location.pathname.startsWith('/admin')) {
+        setView('admin');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   const [history, setHistory] = useState<HistoryItem[]>(() => {
@@ -52,18 +157,15 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Sync with Firestore history if logged in
+  // Sync with Firestore history if logged in with real Firebase Auth
   useEffect(() => {
-    if (!user) {
-      // Revert to local history when logged out
+    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
+
+    if (!isRealFirebaseAuth) {
       const saved = localStorage.getItem('dermal_history');
       setHistory(saved ? JSON.parse(saved) : []);
       return;
     }
-
-    // Clear local storage when logging in to avoid confusion with cloud records
-    // or we could merge them, but for this clinical app, let's keep them separate
-    // localStorage.removeItem('dermal_history'); 
 
     const historyPath = `users/${user.uid}/history`;
     const q = query(
@@ -77,8 +179,12 @@ export default function App() {
         id: doc.id
       })) as HistoryItem[];
       setHistory(items);
+      // Keep local backup synchronized
+      localStorage.setItem('dermal_history', JSON.stringify(items));
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, historyPath);
+      console.warn("Firestore history sync note:", error);
+      const saved = localStorage.getItem('dermal_history');
+      setHistory(saved ? JSON.parse(saved) : []);
     });
 
     return () => unsubscribe();
@@ -95,79 +201,98 @@ export default function App() {
       skinTone
     };
 
-    if (user) {
+    // 1. Log prediction event for global usage analytics
+    const predId = `pred_${Math.random().toString(36).substr(2, 9)}`;
+    try {
+      await setDoc(doc(db, 'predictions', predId), {
+        id: predId,
+        userId: user ? user.uid : 'anon_worker',
+        condition: newAnalysis.condition,
+        probability: newAnalysis.probability,
+        severity: newAnalysis.severity,
+        timestamp: timestamp,
+        skinTone: skinTone
+      });
+    } catch (e) {
+      console.warn('Prediction log note:', e);
+    }
+
+    // 2. Save user specific history locally first
+    const updated = [newItem, ...history];
+    setHistory(updated);
+    localStorage.setItem('dermal_history', JSON.stringify(updated));
+
+    // 3. Save to Firestore if authenticated
+    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
+    if (isRealFirebaseAuth) {
       const historyPath = `users/${user.uid}/history`;
       try {
         await setDoc(doc(db, historyPath, newItem.id), {
           ...newItem,
           userId: user.uid,
-          timestamp: timestamp // Store as string for consistency with types, or use FieldValue
+          timestamp: timestamp
         });
       } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, historyPath);
+        console.warn('Firestore history save fallback:', error);
       }
-    } else {
-      const updated = [newItem, ...history];
-      setHistory(updated);
-      localStorage.setItem('dermal_history', JSON.stringify(updated));
     }
   };
 
   const deleteHistoryItem = async (id: string) => {
-    // Optimistic update for better UX
-    const previousHistory = [...history];
     const updated = history.filter(item => item.id !== id);
     setHistory(updated);
+    localStorage.setItem('dermal_history', JSON.stringify(updated));
+    window.dispatchEvent(new Event('storage'));
 
-    if (user) {
+    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
+    if (isRealFirebaseAuth) {
       const path = `users/${user.uid}/history/${id}`;
       try {
         await deleteDoc(doc(db, `users/${user.uid}/history`, id));
       } catch (error) {
-        setHistory(previousHistory); // Rollback
-        alert("Failed to delete item from server.");
-        handleFirestoreError(error, OperationType.DELETE, path);
+        console.warn('Firestore history delete error:', error);
       }
-    } else {
-      localStorage.setItem('dermal_history', JSON.stringify(updated));
     }
   };
 
   const clearHistory = async () => {
-    const previousHistory = [...history];
+    // 1. Immediately wipe local history and cache
     setHistory([]);
+    localStorage.removeItem('dermal_history');
+    window.dispatchEvent(new Event('storage'));
 
-    if (user) {
+    // 2. Clear cloud history for user in Firestore
+    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
+    if (isRealFirebaseAuth) {
       const historyPath = `users/${user.uid}/history`;
       try {
         const q = query(collection(db, historyPath));
         const snapshot = await getDocs(q);
-        if (snapshot.empty) return;
-
-        const batch = writeBatch(db);
-        snapshot.docs.forEach((doc) => {
-          batch.delete(doc.ref);
-        });
-        await batch.commit();
+        if (!snapshot.empty) {
+          const batch = writeBatch(db);
+          snapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+        }
       } catch (error) {
-        setHistory(previousHistory); // Rollback
-        alert("Failed to clear history from server.");
-        handleFirestoreError(error, OperationType.DELETE, historyPath);
+        console.warn('Firestore history clear note:', error);
       }
-    } else {
-      localStorage.removeItem('dermal_history');
     }
   };
 
   const handleSignIn = async () => {
-    try {
-      await signIn();
-    } catch (error) {
-      alert("Sign in failed");
-    }
+    openAuthModal('user');
   };
 
-  const handleSignOut = () => signOut(auth);
+  const handleSignOut = async () => {
+    localStorage.removeItem('dermal_guest_entered');
+    await signOutUser();
+    setUser(null);
+    setUserSession(null);
+    window.dispatchEvent(new Event('storage'));
+    changeView('login');
+  };
 
   const handleCapture = (image: string) => {
     setCapturedImage(image);
@@ -213,17 +338,75 @@ export default function App() {
     }
   };
 
+  const userRole = userSession?.role || (user ? 'Clinic Worker' : null);
+  const isAdmin = userRole === 'Admin';
+
+  // Render Entry Login View
+  if (view === 'login') {
+    return (
+      <EntryLogin
+        initialMode={authModalMode}
+        onSuccess={(loggedUser) => {
+          setUser(loggedUser);
+          setUserSession(getActiveUserSession());
+          changeView('landing');
+        }}
+        onContinueAsGuest={() => {
+          localStorage.setItem('dermal_guest_entered', 'true');
+          changeView('landing');
+        }}
+      />
+    );
+  }
+
+  // Render Admin View
+  if (view === 'admin') {
+    return (
+      <>
+        <AdminAnalytics
+          user={user}
+          onSignIn={() => openAuthModal('admin')}
+          onBackToApp={() => changeView('landing')}
+        />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          initialMode={authModalMode}
+          onSuccess={(loggedUser) => {
+            setUser(loggedUser);
+            setUserSession(getActiveUserSession());
+          }}
+        />
+      </>
+    );
+  }
+
+  // Render Landing Page
   if (view === 'landing') {
     return (
-      <Landing 
-        onStartScanner={() => setView('scanner')} 
-        onViewRadar={() => setView('radar')} 
-        selectedLanguage={language}
-        onLanguageChange={setLanguage}
-        user={user}
-        onSignIn={handleSignIn}
-        onSignOut={handleSignOut}
-      />
+      <>
+        <Landing 
+          onStartScanner={() => changeView('scanner')} 
+          onViewRadar={() => changeView('radar')} 
+          onOpenAdmin={() => changeView('admin')}
+          onOpenUserLogin={() => openAuthModal('user')}
+          onOpenAdminLogin={() => openAuthModal('admin')}
+          selectedLanguage={language}
+          onLanguageChange={setLanguage}
+          user={user}
+          userSession={userSession}
+          onSignOut={handleSignOut}
+        />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          initialMode={authModalMode}
+          onSuccess={(loggedUser) => {
+            setUser(loggedUser);
+            setUserSession(getActiveUserSession());
+          }}
+        />
+      </>
     );
   }
 
@@ -234,23 +417,65 @@ export default function App() {
         <div className="max-w-7xl mx-auto h-full flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <div 
-              onClick={() => setView('landing')}
-              className="w-8 h-8 bg-clinical-primary rounded-lg flex items-center justify-center text-white cursor-pointer"
+              onClick={() => changeView('landing')}
+              className="w-8 h-8 bg-clinical-primary rounded-lg flex items-center justify-center text-white cursor-pointer shadow-sm"
             >
               <Leaf size={18} />
             </div>
-            <span className="text-xl font-black tracking-tighter text-clinical-text">DermAl</span>
+            <span 
+              onClick={() => changeView('landing')}
+              className="text-xl font-black tracking-tighter text-clinical-text cursor-pointer"
+            >
+              DermAl
+            </span>
           </div>
-          <div className="flex items-center space-x-4">
-            {user && (
-              <div className="flex items-center space-x-2">
-                <span className="text-[10px] font-bold text-clinical-text uppercase hidden sm:block tracking-wider">{user.displayName || "Dr."}</span>
-                <button onClick={handleSignOut} className="text-clinical-text/40 hover:text-red-500 transition-colors">
+
+          <div className="flex items-center space-x-3">
+            {isAdmin && (
+              <button
+                onClick={() => changeView('admin')}
+                className="flex items-center space-x-1.5 bg-teal-900 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-teal-800 transition-all shadow-sm cursor-pointer"
+              >
+                <Shield size={14} />
+                <span className="hidden sm:inline">Admin Surveillance</span>
+              </button>
+            )}
+
+            {user ? (
+              <div className="flex items-center space-x-2.5 bg-white px-3 py-1.5 rounded-xl border border-clinical-border shadow-sm">
+                <span className={cn(
+                  "text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md",
+                  isAdmin ? "bg-teal-900 text-white" : "bg-clinical-primary/10 text-clinical-primary"
+                )}>
+                  {userRole}
+                </span>
+                <span className="text-xs font-bold text-clinical-text hidden sm:block truncate max-w-[120px]">
+                  {userSession?.displayName || user.displayName || user.email}
+                </span>
+                <button 
+                  onClick={handleSignOut} 
+                  className="text-clinical-text/40 hover:text-red-500 transition-colors p-1"
+                  title="Sign out"
+                >
                   <LogOut size={16} />
                 </button>
               </div>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => openAuthModal('user')}
+                  className="text-xs font-bold text-clinical-primary bg-clinical-primary/10 px-3 py-1.5 rounded-xl hover:bg-clinical-primary hover:text-white transition-all"
+                >
+                  User Login
+                </button>
+                <button
+                  onClick={() => openAuthModal('admin')}
+                  className="text-xs font-bold text-teal-950 bg-teal-100 px-3 py-1.5 rounded-xl hover:bg-teal-900 hover:text-white transition-all hidden sm:inline-block"
+                >
+                  Admin Sign In
+                </button>
+              </div>
             )}
-            <div className="text-[10px] font-bold text-clinical-text/40 uppercase tracking-widest">Field Clinic</div>
           </div>
         </div>
       </nav>
@@ -378,7 +603,7 @@ export default function App() {
                   setAnalysis(item.analysis);
                   setVoiceDescription(item.voiceDescription || "");
                   setSkinTone(item.skinTone as SkinTone);
-                  setView('scanner');
+                  changeView('scanner');
                 }}
                 onClearHistory={clearHistory}
                 onDeleteItem={deleteHistoryItem}
@@ -399,12 +624,13 @@ export default function App() {
             { id: 'scanner', icon: ScanLine, label: 'Scan' },
             { id: 'history', icon: Clock, label: 'History' },
             { id: 'radar', icon: Users, label: 'Community' },
+            ...(isAdmin ? [{ id: 'admin', icon: Shield, label: 'Admin' }] : [])
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setView(tab.id as any)}
+              onClick={() => changeView(tab.id as any)}
               className={cn(
-                "flex-1 flex flex-col items-center justify-center space-y-1 h-14 rounded-2xl transition-all",
+                "flex-1 flex flex-col items-center justify-center space-y-1 h-14 rounded-2xl transition-all cursor-pointer",
                 view === tab.id 
                   ? "bg-clinical-primary/5 text-clinical-primary" 
                   : "text-clinical-text/30 hover:text-clinical-text/60"
@@ -416,7 +642,16 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        initialMode={authModalMode}
+        onSuccess={(loggedUser) => {
+          setUser(loggedUser);
+          setUserSession(getActiveUserSession());
+        }}
+      />
     </div>
   );
 }
-

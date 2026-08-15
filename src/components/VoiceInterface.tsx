@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Volume2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -36,7 +36,7 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
         }
         if (currentTranscript) {
           setTranscript(prev => {
-            const next = prev + " " + currentTranscript;
+            const next = (prev ? prev + " " : "") + currentTranscript;
             onTranscriptChange(next);
             return next;
           });
@@ -47,26 +47,56 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
         console.error("Speech recognition error", event.error);
         setIsListening(false);
       };
+
+      recognition.current.onend = () => {
+        setIsListening(false);
+      };
     } else {
       setBrowserSupported(false);
     }
+
+    return () => {
+      if (recognition.current) {
+        try {
+          recognition.current.stop();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
   }, [language, onTranscriptChange]);
 
   const toggleListening = () => {
-    if (isListening) {
-      recognition.current?.stop();
-    } else {
-      recognition.current?.start();
+    if (!browserSupported) {
+      alert("Speech recognition is not supported in this browser. Please type symptoms in the text box.");
+      return;
     }
-    setIsListening(!isListening);
+
+    if (isListening) {
+      try {
+        recognition.current?.stop();
+      } catch (e) {
+        // ignore
+      }
+      setIsListening(false);
+    } else {
+      try {
+        recognition.current?.start();
+        setIsListening(true);
+      } catch (e) {
+        console.error("Speech recognition start failed", e);
+        setIsListening(false);
+      }
+    }
   };
 
   return (
     <div className="flex items-center space-x-2">
       <button 
+        type="button"
         onClick={toggleListening}
         className={cn(
-          "h-14 px-6 rounded-full flex items-center justify-center space-x-2 transition-all active:scale-95 border",
+          "h-14 px-6 rounded-full flex items-center justify-center space-x-2 transition-all active:scale-95 border cursor-pointer",
           isListening 
             ? "bg-red-50 text-red-500 border-red-200 shadow-lg shadow-red-100" 
             : "bg-white text-clinical-primary border-clinical-border shadow-sm hover:border-clinical-primary/40"
@@ -95,5 +125,3 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
     </div>
   );
 };
-
-import { useRef } from 'react';

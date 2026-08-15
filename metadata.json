@@ -2,5 +2,5 @@
   "name": "DermAl",
   "description": "Offline-first dermatology AI for rural India, optimized for darker skin tones and voice accessibility.",
   "requestFramePermissions": ["camera", "microphone"],
-  "majorCapabilities": ["Image Analysis", "Voice Interaction", "Local Health Monitoring"]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API", "Image Analysis", "Voice Interaction", "Local Health Monitoring"]
 }

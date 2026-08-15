@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Radar, AlertCircle, TrendingUp, Users, MapPin, Search } from 'lucide-react';
+import { Radar, AlertCircle, TrendingUp, Users, MapPin, Search, FileDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CommunityAlert, Severity } from '../types';
 import { cn } from '../lib/utils';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { jsPDF } from 'jspdf';
 
 export const CommunityRadar: React.FC = () => {
   const [alerts, setAlerts] = useState<CommunityAlert[]>([]);
@@ -34,14 +35,100 @@ export const CommunityRadar: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  const clusters = alerts.reduce((acc: any, curr) => {
+  const clusters = alerts.reduce<Record<string, number>>((acc, curr) => {
     acc[curr.condition] = (acc[curr.condition] || 0) + 1;
     return acc;
   }, {});
 
-  const topConditions = Object.entries(clusters)
-    .sort(([, a]: any, [, b]: any) => b - a)
+  const topConditions: [string, number][] = Object.entries(clusters)
+    .sort(([, a], [, b]) => b - a)
     .slice(0, 3);
+
+  const handleDownloadSurveillanceReport = () => {
+    try {
+      const doc = new jsPDF();
+      const margin = 20;
+      let y = 25;
+
+      doc.setFontSize(20);
+      doc.setTextColor(19, 78, 74);
+      doc.text("DermAl Community Surveillance Report", margin, y);
+      
+      y += 10;
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+      doc.text(`Region: Maharashtra-Rural / Primary Health Centers`, margin + 90, y);
+
+      y += 12;
+      doc.setDrawColor(200);
+      doc.line(margin, y, 190, y);
+
+      y += 15;
+      doc.setFontSize(14);
+      doc.setTextColor(0);
+      doc.setFont("helvetica", "bold");
+      doc.text("Executive Summary", margin, y);
+
+      y += 8;
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Total Active Telemetry Reports: ${alerts.length}`, margin, y);
+      y += 6;
+      doc.text(`High-Frequency Cluster Outbreaks: ${topConditions.filter(([_, v]) => (v as number) >= 3).length}`, margin, y);
+
+      y += 15;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Top Detected Conditions (Last 7 Days):", margin, y);
+
+      y += 8;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      if (topConditions.length > 0) {
+        topConditions.forEach(([cond, count], idx) => {
+          doc.text(`${idx + 1}. ${cond} — ${count} recorded occurrences (${count >= 3 ? 'ALERT: Outbreak Cluster' : 'Standard Baseline'})`, margin + 5, y);
+          y += 7;
+        });
+      } else {
+        doc.text("No active clusters detected in the regional dataset.", margin + 5, y);
+        y += 7;
+      }
+
+      y += 15;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Recent Activity Log:", margin, y);
+
+      y += 8;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const recent = alerts.slice(0, 15);
+      if (recent.length > 0) {
+        recent.forEach((item, idx) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          const time = new Date(item.timestamp).toLocaleString();
+          doc.text(`[${time}] ${item.condition} - Loc: ${item.location || 'Rural District'} (Severity: ${item.severity || 'Moderate'})`, margin + 5, y);
+          y += 6;
+        });
+      } else {
+        doc.text("No recent logs recorded.", margin + 5, y);
+      }
+
+      y = 280;
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text("DermAl Epidemiological Edge Surveillance · For Authorized Public Health Personnel Only", margin, y);
+
+      doc.save(`DermAl_Surveillance_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (e) {
+      console.error("Surveillance PDF error", e);
+      alert("Failed to export PDF report.");
+    }
+  };
 
   return (
     <div className="bg-white rounded-[3rem] p-8 lg:p-12 border border-clinical-border shadow-sm medical-grid">
@@ -139,8 +226,13 @@ export const CommunityRadar: React.FC = () => {
               ))}
             </AnimatePresence>
           </div>
-          <button className="w-full py-5 text-sm font-bold text-clinical-primary border border-clinical-primary/20 rounded-[2rem] hover:bg-clinical-primary hover:text-white transition-all active:scale-95">
-            Download Surveillance PDF
+          <button 
+            type="button"
+            onClick={handleDownloadSurveillanceReport}
+            className="w-full py-5 text-sm font-bold text-clinical-primary border border-clinical-primary/20 rounded-[2rem] hover:bg-clinical-primary hover:text-white transition-all active:scale-95 flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
+          >
+            <FileDown size={18} />
+            <span>Download Surveillance PDF</span>
           </button>
         </div>
       </div>
