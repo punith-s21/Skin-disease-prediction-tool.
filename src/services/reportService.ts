@@ -1,5 +1,45 @@
 import { jsPDF } from 'jspdf';
-import { Analysis } from '../types';
+import { Analysis, Severity } from '../types';
+
+export function parseRecommendationPoints(raw: string): string[] {
+  if (!raw) return [];
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const points: string[] = [];
+
+  for (const line of lines) {
+    let clean = line.replace(/^\*\*.*?\*\*:\s*/, '').trim();
+    if (!clean) continue;
+
+    const bulletMatch = clean.match(/^[-*•\d\.\)]+\s*(.*)$/);
+    if (bulletMatch && bulletMatch[1].trim()) {
+      clean = bulletMatch[1].trim();
+    }
+
+    if (clean.includes('. ') && clean.length > 90) {
+      const sentences = clean
+        .split(/(?<=[.?!])\s+(?=[A-Z0-9\u0900-\u0DFF])/g)
+        .map(s => s.trim().replace(/^[-*•\d\.\)]+\s*/, ''))
+        .filter(s => s.length > 5);
+      if (sentences.length > 1) {
+        points.push(...sentences);
+        continue;
+      }
+    }
+
+    if (clean.length > 0) {
+      points.push(clean);
+    }
+  }
+
+  if (points.length === 0) {
+    return raw
+      .split(/(?<=[.?!])\s+/g)
+      .map(s => s.replace(/^[-*•\d\.\)]+\s*/, '').trim())
+      .filter(s => s.length > 5);
+  }
+
+  return points;
+}
 
 export async function generatePDFReport(
   analysis: Analysis,
@@ -8,12 +48,19 @@ export async function generatePDFReport(
   timestamp: string = new Date().toLocaleString(),
   language: string = "English"
 ) {
-  const doc = new jsPDF();
-  const margin = 20;
-  const pageWidth = doc.internal.pageSize.getWidth();
-  let y = 30;
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
 
-  // Normalize language identifier (supports 'en-IN', 'hi-IN', 'English', etc.)
+  const pageWidth = doc.internal.pageSize.getWidth(); // 210mm
+  const pageHeight = doc.internal.pageSize.getHeight(); // 297mm
+  const margin = 14;
+  const contentWidth = pageWidth - (margin * 2); // 182mm
+  let y = 14;
+
+  // Language normalizer
   const normalizeLang = (l: string): string => {
     const map: Record<string, string> = {
       'en-IN': 'English',
@@ -29,320 +76,383 @@ export async function generatePDFReport(
 
   const resolvedLang = normalizeLang(language);
 
-  // Translation Map
+  // Localization Strings
   const translations: Record<string, any> = {
     "English": {
-      title: "DermAl Clinical Analysis Report",
-      generated: "Generated on",
+      title: "DermAI Clinical Screening Report",
+      subtitle: "AI-Assisted Dermatological Analysis & Triage Summary",
+      generated: "Generated Date",
       patient: "Patient Reference",
       finding: "Clinical Finding",
-      confidence: "Confidence Score",
-      severity: "Severity Level",
-      advice: "Medical Advice & Next Steps",
-      features: "Observed Clinical Features",
-      disclaimer: "ETHICAL DISCLAIMER (MANDATORY): This system is for educational and research purposes only. It is not a medical diagnostic tool. Please consult a qualified healthcare professional.",
-      warning: "Clinical Warning: This is an AI-assisted analysis and should be verified by a board-certified dermatologist."
+      confidence: "Confidence",
+      severity: "Severity Priority",
+      localization: "Localization",
+      advice: "Clinical Recommendations & Action Plan",
+      features: "Observed Diagnostic Features",
+      disclaimer: "ETHICAL DISCLAIMER: This system is for educational & preliminary triage assistance only. It is not a substitute for formal clinical laboratory diagnosis.",
+      warning: "Clinical Safety Note: Always consult a registered medical practitioner or dermatologist for medical diagnosis and treatment plans."
     },
     "Hindi": {
-      title: "DermAl नैदानिक विश्लेषण रिपोर्ट",
-      generated: "दिनांक",
-      patient: "रोगी संदर्भ",
+      title: "DermAI नैदानिक त्वचा जांच रिपोर्ट",
+      subtitle: "एआई-सहायता प्राप्त त्वचा विश्लेषण और प्राथमिक परामर्श",
+      generated: "दिनांक एवं समय",
+      patient: "रोगी का नाम",
       finding: "नैदानिक निष्कर्ष",
-      confidence: "आत्मविश्वास स्कोर",
-      severity: "गंभीरता का स्तर",
-      advice: "चिकित्सा सलाह और अगले चरण",
-      features: "मुख्य नैदानिक विशेषताएं",
-      disclaimer: "नैतिक अस्वीकरण (अनिवार्य): यह प्रणाली केवल शैक्षिक और अनुसंधान उद्देश्यों के लिए है। यह एक चिकित्सा नैदानिक उपकरण नहीं है। कृपया एक योग्य स्वास्थ्य देखभाल पेशेवर से परामर्श लें।",
-      warning: "नैदानिक चेतावनी: यह एक एआई-सहायता प्राप्त विश्लेषण है और इसे बोर्ड-प्रमाणित त्वचा विशेषज्ञ द्वारा सत्यापित किया जाना चाहिए।"
+      confidence: "सटीकता",
+      severity: "गंभीरता स्तर",
+      localization: "प्रभावित स्थान",
+      advice: "प्राथमिक सिफारिशें एवं आवश्यक कदम",
+      features: "प्रमुख नैदानिक लक्षण",
+      disclaimer: "नैतिक अस्वीकरण: यह रिपोर्ट केवल प्रारंभिक मार्गदर्शन और शैक्षिक सहायता के लिए है। यह औपचारिक चिकित्सा निदान का विकल्प नहीं है।",
+      warning: "चिकित्सा सुरक्षा नोट: कृपया किसी योग्य त्वचा रोग विशेषज्ञ या चिकित्सक से परामर्श अवश्य करें।"
     },
     "Telugu": {
-      title: "DermAl క్లినికల్ అనాలిసిస్ రిపోర్ట్",
-      generated: "తేదీ",
-      patient: "పేషెంట్ రిఫరెన్స్",
-      finding: "క్లినికల్ ఫైండింగ్",
-      confidence: "కాన్ఫిడెన్స్ స్కోర్",
+      title: "DermAI క్లినికల్ చర్మ పరీక్ష నివేదిక",
+      subtitle: "AI ఆధారిత చర్మ విశ్లేషణ మరియు ప్రాథమిక మార్గదర్శకత్వం",
+      generated: "తేదీ మరియు సమయం",
+      patient: "రోగి వివరాలు",
+      finding: "క్లినికల్ నిర్ధారణ",
+      confidence: "ఖచ్చితత్వం",
       severity: "తీవ్రత స్థాయి",
-      advice: "వైద్య సలహా & తదుపరి చర్యలు",
-      features: "గమనించిన క్లినికల్ లక్షణాలు",
-      disclaimer: "నైతిక నిరాకరణ (తప్పనిసరి): ఈ వ్యవస్థ విద్యా మరియు పరిశోధన ప్రయోజనాల కోసం మాత్రమే. ఇది వైద్య రోగనిర్ధారణ సాధనం కాదు. దయచేసి అర్హత కలిగిన ఆరోగ్య సంరక్షణ నిపుణులను సంప్రదించండి.",
-      warning: "క్లినికల్ హెచ్చరిక: ఇది AI-నేతృత్వంలోని విశ్లేషణ మరియు బోర్డ్-సర్టిఫైడ్ చర్మవ్యాధి నిపుణుడిచే ధృవీకరించబడాలి."
+      localization: "శరీర భాగం",
+      advice: "సిఫార్సులు మరియు తదుపరి చర్యలు",
+      features: "గమనించిన చర్మ లక్షణాలు",
+      disclaimer: "నైతిక నిరాకరణ: ఇది విద్యా మరియు ప్రాథమిక అవగాహన కొరకు మాత్రమే. ఇది పూర్తి స్థాయి వైద్య నిర్ధారణ కాదు.",
+      warning: "వైద్య హెచ్చరిక: దయచేసి అర్హత కలిగిన చర్మ నిపుణుడిని సంప్రదించి సలహా పొందండి."
     },
     "Kannada": {
-      title: "DermAl ವೈದ್ಯಕೀಯ ವಿಶ್ಲೇಷಣೆ ವರದಿ",
-      generated: "ದಿನಾಂಕ",
+      title: "DermAI ವೈದ್ಯಕೀಯ ಚರ್ಮ ತಪಾಸಣೆ ವರದಿ",
+      subtitle: "AI-ಆಧಾರಿತ ಚರ್ಮದ ವಿಶ್ಲೇಷಣೆ ಮತ್ತು ಪ್ರಾಥಮಿಕ ಮಾರ್ಗದರ್ಶನ",
+      generated: "ದಿನಾಂಕ ಮತ್ತು ಸಮಯ",
       patient: "ರೋಗಿಯ ಉಲ್ಲೇಖ",
       finding: "ವೈದ್ಯಕೀಯ ಶೋಧನೆ",
-      confidence: "ಆತ್ಮವಿಶ್ವಾಸದ ಅಂಕ",
+      confidence: "ಆತ್ಮವಿಶ್ವಾಸ",
       severity: "ತೀವ್ರತೆಯ ಮಟ್ಟ",
-      advice: "ವೈದ್ಯಕೀಯ ಸಲಹೆ ಮತ್ತು ಮುಂದಿನ ಕ್ರಮಗಳು",
+      localization: "ಪೀಡಿತ ಭಾಗ",
+      advice: "ಪ್ರಾಥಮಿಕ ಶಿಫಾರಸುಗಳು ಮತ್ತು ಮುಂದಿನ ಕ್ರಮಗಳು",
       features: "ಗಮನಿಸಿದ ವೈದ್ಯಕೀಯ ಲಕ್ಷಣಗಳು",
-      disclaimer: "ನೈತಿಕ ಹಕ್ಕು ನಿರಾಕರಣೆ (ಕಡ್ಡಾಯ): ಈ ವ್ಯವಸ್ಥೆಯು ಶೈಕ್ಷಣಿಕ ಮತ್ತು ಸಂಶೋಧನಾ ಉದ್ದೇಶಗಳಿಗಾಗಿ ಮಾತ್ರ. ಇದು ವೈದ್ಯಕೀಯ ರೋಗನಿರ್ಧರಣಾ ಸಾಧನವಲ್ಲ. ದಯವಿಟ್ಟು ಅರ್ಹ ಆರೋಗ್ಯ ವೃತ್ತಿಪರರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
-      warning: "ವೈದ್ಯಕೀಯ ಎಚ್ಚರಿಕೆ: ಇದು AI-ಚಾಲಿತ ವಿಶ್ಲೇಷಣೆಯಾಗಿದ್ದು, ಇದನ್ನು ಮಂಡಳಿ-ಪ್ರಮಾಣೀಕೃತ ಚರ್ಮರೋಗ ತಜ್ಞರು ಪರಿಶೀಲಿಸಬೇಕು."
+      disclaimer: "ನೈತಿಕ ಹಕ್ಕು ನಿರಾಕರಣೆ: ಇದು ಶೈಕ್ಷಣಿಕ ಮತ್ತು ಪ್ರಾಥಮಿಕ ಮಾರ್ಗದರ್ಶನಕ್ಕಾಗಿ ಮಾತ್ರ. ಇದು ಅಂತಿಮ ವೈದ್ಯಕೀಯ ರೋಗನಿರ್ಣಯವಲ್ಲ.",
+      warning: "ವೈದ್ಯಕೀಯ ಎಚ್ಚರಿಕೆ: ದಯವಿಟ್ಟು ಚಿಕಿತ್ಸೆಗಾಗಿ ಅರ್ಹ ವೈದ್ಯರು ಅಥವಾ ಚರ್ಮರೋಗ ತಜ್ಞರನ್ನು ಸಂಪರ್ಕಿಸಿ."
     },
     "Tamil": {
-      title: "DermAl மருத்துவ பகுப்பாய்வு அறிக்கை",
-      generated: "தேதி",
+      title: "DermAI மருத்துவ தோல் பரிசோதனை அறிக்கை",
+      subtitle: "AI அடிப்படையிலான தோல் பகுப்பாய்வு மற்றும் ஆரம்ப வழிகாட்டுதல்",
+      generated: "தேதி மற்றும் நேரம்",
       patient: "நோயாளி குறிப்பு",
-      finding: "மருத்துவ கண்டுபிடிப்பு",
-      confidence: "நம்பகத்தன்மை மதிப்பீடு",
+      finding: "மருத்துவ முடிவு",
+      confidence: "நம்பகத்தன்மை",
       severity: "தீவிர நிலை",
-      advice: "மருத்துவ ஆலோசனை மற்றும் அடுத்த கட்டங்கள்",
-      features: "கண்டறியப்பட்ட மருத்துவ அம்சங்கள்",
-      disclaimer: "முக்கிய மறுப்பு: இந்த அமைப்பு கல்வி மற்றும் ஆராய்ச்சி நோக்கங்களுக்காக மட்டுமே. இது ஒரு முழுமையான மருத்துவக் கருவி அல்ல.",
-      warning: "மருத்துவ எச்சரிக்கை: இது ஒரு AI-உதவி பகுப்பாய்வு மற்றும் தகுதிவாய்ந்த மருத்துவரிடம் உறுதிப்படுத்தப்பட வேண்டும்."
+      localization: "பாதிக்கப்பட்ட பகுதி",
+      advice: "முதன்மை பரிந்துரைகள் மற்றும் வழிகாட்டுதல்கள்",
+      features: "கண்டறியப்பட்ட அறிகுறிகள்",
+      disclaimer: "முக்கிய மறுப்பு: இது கல்வி மற்றும் ஆரம்ப வழிகாட்டலுக்கு மட்டுமே. முறையான மருத்துவ பரிசோதனைக்கு மாற்றாகாது.",
+      warning: "மருத்துவ எச்சரிக்கை: தகுதிவாய்ந்த மருத்துவரிடம் உறுதிசெய்து சிகிச்சை பெறவும்."
     },
     "Marathi": {
-      title: "DermAl क्लिनिकल विश्लेषण अहवाल",
-      generated: "तारीख",
+      title: "DermAI क्लिनिकल त्वचा तपासणी अहवाल",
+      subtitle: "AI-आधारित त्वचा विश्लेषण आणि प्राथमिक सल्ला",
+      generated: "तारीख आणि वेळ",
       patient: "रुग्ण संदर्भ",
       finding: "क्लिनिकल निष्कर्ष",
-      confidence: "आत्मविश्वास स्कोअर",
-      severity: "तीव्रता पातळी",
-      advice: "वैद्यकीय सल्ला आणि पुढील पावले",
-      features: "निरीक्षण केलेली वैशिष्ट्ये",
-      disclaimer: "नैतिक अस्वीकरण: ही प्रणाली केवळ शैक्षणिक आणि संशोधन हेतूंसाठी आहे. कृपया तज्ञ डॉक्टरांचा सल्ला घ्या.",
-      warning: "वैद्यकीय चेतावणी: हे AI-सहाय्यित विश्लेषण आहे आणि त्वचारोगतज्ज्ञांकडून सत्यापित केले जावे."
+      confidence: "अचूकता",
+      severity: "तीव्रता",
+      localization: "प्रभावित भाग",
+      advice: "प्राथमिक शिफारसी आणि पुढील पावले",
+      features: "निरीक्षण केलेली लक्षणे",
+      disclaimer: "नैतिक अस्वीकरण: हा अहवाल केवळ शैक्षणिक व प्राथमिक मार्गदर्शनासाठी आहे. हे अंतिम वैद्यकीय निदान नाही.",
+      warning: "वैद्यकीय चेतावणी: उपचारासाठी कृपया तज्ञ डॉक्टरांचा सल्ला घ्या."
     },
     "Bengali": {
-      title: "DermAl ক্লিনিকাল বিশ্লেষণ রিপোর্ট",
-      generated: "তারিখ",
-      patient: "রোগীর তথ্য",
+      title: "DermAI ক্লিনিকাল ত্বক পরীক্ষা রিপোর্ট",
+      subtitle: "AI-ভিত্তিক ত্বক বিশ্লেষণ এবং প্রাথমিক পরামর্শ",
+      generated: "তারিখ ও সময়",
+      patient: "রোগীর বিবরণ",
       finding: "ক্লিনিকাল ফলাফল",
-      confidence: "কনফিডেন্স স্কোর",
+      confidence: "নির্ভুলতা",
       severity: "তীব্রতার মাত্রা",
-      advice: "চিকিৎসা পরামর্শ ও পরবর্তী পদক্ষেপ",
+      localization: "আক্রান্ত স্থান",
+      advice: "প্রাথমিক পরামর্শ ও প্রয়োজনীয় পদক্ষেপ",
       features: "পর্যবেক্ষিত লক্ষণসমূহ",
-      disclaimer: "নৈতিক দাবিত্যাগ: এই সিস্টেমটি কেবল শিক্ষামূলক এবং গবেষণামূলক উদ্দেশ্যে তৈরি। ডাক্তারের পরামর্শ নিন।",
-      warning: "ক্লিনিক্যাল সতর্কতা: এটি একটি এআই-সহায়তা প্রাপ্ত বিশ্লেষণ।"
+      disclaimer: "নৈতিক দাবিত্যাগ: এটি কেবল শিক্ষামূলক এবং প্রাথমিক ট্রায়াজ সহায়তার জন্য। এটি চূড়ান্ত চিকিৎসা রিপোর্ট নয়।",
+      warning: "চিকিৎসা সতর্কতা: সঠিক চিকিৎসার জন্য সর্বদা বিশেষজ্ঞ চিকিৎসকের পরামর্শ নিন।"
     }
   };
 
   const t = translations[resolvedLang] || translations["English"];
-  const isIndic = ["Hindi", "Telugu", "Kannada", "Tamil", "Marathi", "Bengali"].includes(resolvedLang);
 
-  // Helper for rendering Indic text as image (jsPDF fallback for non-Latin)
-  const renderIndicText = (text: string, fontSize: number, isBold: boolean = false, maxWidth: number = 500) => {
-    // Clean markdown for basic canvas rendering
-    const cleanText = text.replace(/[*#`_]/g, '');
-    
+  // Ultra-crisp Canvas Renderer for Indic & Multilingual text
+  const renderTextToImage = (
+    text: string, 
+    fontSizePt: number, 
+    isBold: boolean = false, 
+    maxWidthMm: number = 180,
+    textColor: string = '#1e293b'
+  ): { data: string; width: number; height: number } | null => {
+    if (!text || typeof text !== 'string') return null;
+    const cleanText = text.replace(/[*#`_]/g, '').trim();
+    if (!cleanText) return null;
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    
-    // High resolution factor
+
+    // High resolution scaling (3x scale)
     const scale = 3;
-    const fontStack = `${isBold ? 'bold' : 'normal'} ${fontSize * scale}px "Noto Sans Kannada", "Noto Sans Telugu", "Noto Sans Devanagari", "Segoe UI", Tahoma, sans-serif`;
+    const pxPerMm = 3.779528;
+    const targetWidthPx = Math.max(10, Math.round(maxWidthMm * pxPerMm * scale));
+    const fontPx = Math.round(fontSizePt * 1.3333 * scale);
+    
+    // Clean font stack prioritizing native Indic fonts
+    const fontStack = `${isBold ? 'bold' : 'normal'} ${fontPx}px "Noto Sans Kannada", "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Tamil", "Noto Sans Bengali", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif`;
     ctx.font = fontStack;
-    
-    // Split into intentional paragraphs first
+
+    // Word wrapping with punctuation break support
     const paragraphs = cleanText.split('\n');
-    const allLines: string[] = [];
-    
-    paragraphs.forEach(paragraph => {
-      const words = paragraph.split(' ');
+    const lines: string[] = [];
+
+    for (const para of paragraphs) {
+      if (!para.trim()) continue;
+      const words = para.split(' ');
       let currentLine = '';
-      
+
       for (const word of words) {
         const testLine = currentLine ? currentLine + ' ' + word : word;
         const metrics = ctx.measureText(testLine);
-        if (metrics.width > maxWidth * scale && currentLine) {
-          allLines.push(currentLine);
+        
+        if (metrics.width > (targetWidthPx - (8 * scale)) && currentLine) {
+          lines.push(currentLine);
           currentLine = word;
         } else {
           currentLine = testLine;
         }
       }
-      allLines.push(currentLine);
-    });
-    
-    const lineHeight = fontSize * scale * 1.5;
-    canvas.width = maxWidth * scale;
-    canvas.height = allLines.length * lineHeight + (20 * scale); // Add padding
-    
-    // Re-apply styles after resizing
+      if (currentLine) {
+        lines.push(currentLine);
+      }
+    }
+
+    if (lines.length === 0) return null;
+
+    const lineSpacingPx = Math.round(fontPx * 1.45);
+    const topPaddingPx = Math.round(3 * scale);
+    const bottomPaddingPx = Math.round(3 * scale);
+    const targetHeightPx = lines.length * lineSpacingPx + topPaddingPx + bottomPaddingPx;
+
+    canvas.width = targetWidthPx;
+    canvas.height = targetHeightPx;
+
+    // Canvas resize resets context state, so reapply font
     ctx.font = fontStack;
-    ctx.fillStyle = '#000000';
+    ctx.fillStyle = textColor;
     ctx.textBaseline = 'top';
-    
-    allLines.forEach((line, i) => {
-      ctx.fillText(line.trim(), 10, i * lineHeight + (10 * scale));
+
+    lines.forEach((line, idx) => {
+      ctx.fillText(line.trim(), 2 * scale, topPaddingPx + (idx * lineSpacingPx));
     });
-    
+
+    const renderedHeightMm = (canvas.height / canvas.width) * maxWidthMm;
+
     return {
       data: canvas.toDataURL('image/png'),
-      width: maxWidth,
-      height: (canvas.height / canvas.width) * maxWidth
+      width: maxWidthMm,
+      height: renderedHeightMm
     };
   };
 
-  // Header
-  doc.setFontSize(22);
-  doc.setTextColor(19, 78, 74); // teal-900
-  if (isIndic) {
-    const titleImg = renderIndicText(t.title, 22, true, 160);
-    if (titleImg) doc.addImage(titleImg.data, 'PNG', margin, y - 12, titleImg.width, titleImg.height);
-    y += 5;
+  // 1. TOP BRAND HEADER
+  doc.setFillColor(15, 118, 110); // Primary Teal (#0f766e)
+  doc.rect(margin, y, 3.5, 14, 'F');
+
+  // Title Image
+  const titleImg = renderTextToImage(t.title, 16, true, contentWidth - 8, '#0f766e');
+  if (titleImg) {
+    doc.addImage(titleImg.data, 'PNG', margin + 6, y, titleImg.width, titleImg.height);
+    y += titleImg.height + 1;
   } else {
-    doc.text(t.title, margin, y);
-  }
-  
-  y += 10;
-  doc.setFontSize(10);
-  doc.setTextColor(100);
-  if (isIndic) {
-    const genImg = renderIndicText(`${t.generated}: ${timestamp}`, 10, false, 85);
-    if (genImg) doc.addImage(genImg.data, 'PNG', margin, y - 5, genImg.width, genImg.height);
-    
-    const patImg = renderIndicText(`${t.patient}: ${patientName}`, 10, false, 85);
-    if (patImg) doc.addImage(patImg.data, 'PNG', margin + 95, y - 5, patImg.width, patImg.height);
-    y += 5;
-  } else {
-    doc.text(`${t.generated}: ${timestamp}`, margin, y);
-    doc.text(`${t.patient}: ${patientName}`, margin + 100, y);
-  }
-
-  y += 15;
-  doc.setDrawColor(200);
-  doc.line(margin, y, pageWidth - margin, y);
-
-  // Condition & Confidence
-  y += 20;
-  doc.setFontSize(14);
-  doc.setTextColor(0);
-  doc.setFont("helvetica", "bold");
-  
-  // Since Gemini now provides condition in localized language with English in brackets, 
-  // we can use it directly.
-  const displayCondition = analysis.condition;
-
-  if (isIndic) {
-    const findLabelImg = renderIndicText(`${t.finding}:`, 14, true, 50);
-    if (findLabelImg) doc.addImage(findLabelImg.data, 'PNG', margin, y - 8, findLabelImg.width, findLabelImg.height);
-    
-    const findValImg = renderIndicText(displayCondition, 14, false, 120);
-    if (findValImg) doc.addImage(findValImg.data, 'PNG', margin + 45, y - 8, findValImg.width, findValImg.height);
-  } else {
-    doc.text(`${t.finding}:`, margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(displayCondition, margin + 45, y);
-  }
-
-  y += 12;
-  doc.setFont("helvetica", "bold");
-  const prob = (analysis.probability * 100).toFixed(1);
-  if (isIndic) {
-    const confLabelImg = renderIndicText(`${t.confidence}:`, 14, true, 50);
-    if (confLabelImg) doc.addImage(confLabelImg.data, 'PNG', margin, y - 8, confLabelImg.width, confLabelImg.height);
-    const confValImg = renderIndicText(`${prob}%`, 14, false, 40);
-    if (confValImg) doc.addImage(confValImg.data, 'PNG', margin + 50, y - 8, confValImg.width, confValImg.height);
-  } else {
-    doc.text(`${t.confidence}:`, margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(`${prob}%`, margin + 50, y);
-  }
-
-  y += 12;
-  doc.setFont("helvetica", "bold");
-  if (isIndic) {
-    const sevLabelImg = renderIndicText(`${t.severity}:`, 14, true, 50);
-    if (sevLabelImg) doc.addImage(sevLabelImg.data, 'PNG', margin, y - 8, sevLabelImg.width, sevLabelImg.height);
-    const sevValImg = renderIndicText(analysis.severity, 14, false, 50);
-    if (sevValImg) doc.addImage(sevValImg.data, 'PNG', margin + 45, y - 8, sevValImg.width, sevValImg.height);
-  } else {
-    doc.text(`${t.severity}:`, margin, y);
-    doc.text(analysis.severity, margin + 45, y);
-  }
-
-  // Clinical Features Section
-  if (analysis.features && analysis.features.length > 0) {
-    y += 18;
     doc.setFont("helvetica", "bold");
-    if (isIndic) {
-      const featLabelImg = renderIndicText(`${t.features}:`, 14, true, 120);
-      if (featLabelImg) doc.addImage(featLabelImg.data, 'PNG', margin, y - 8, featLabelImg.width, featLabelImg.height);
-    } else {
-      doc.text(`${t.features}:`, margin, y);
-    }
-    
+    doc.setFontSize(16);
+    doc.setTextColor(15, 118, 110);
+    doc.text(t.title, margin + 6, y + 5);
+    y += 7;
+  }
+
+  // Subtitle Image
+  const subImg = renderTextToImage(t.subtitle, 8.5, false, contentWidth - 8, '#64748b');
+  if (subImg) {
+    doc.addImage(subImg.data, 'PNG', margin + 6, y, subImg.width, subImg.height);
+    y += subImg.height + 4;
+  } else {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    
-    const featuresToDisplay = analysis.features.slice(0, 5);
-    featuresToDisplay.forEach((feature) => {
-      y += 8;
-      if (isIndic) {
-        const featItemImg = renderIndicText(`• ${feature}`, 10, false, 160);
-        if (featItemImg) doc.addImage(featItemImg.data, 'PNG', margin + 5, y - 5, featItemImg.width, featItemImg.height);
-      } else {
-        doc.text(`• ${feature}`, margin + 5, y);
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(t.subtitle, margin + 6, y + 3);
+    y += 5;
+  }
+
+  // 2. METADATA ROW (Date & Patient)
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.roundedRect(margin, y, contentWidth, 10, 2, 2, 'FD');
+
+  const halfWidth = (contentWidth - 6) / 2;
+  const metaDateImg = renderTextToImage(`${t.generated}: ${timestamp}`, 8, false, halfWidth, '#475569');
+  if (metaDateImg) {
+    doc.addImage(metaDateImg.data, 'PNG', margin + 4, y + 2, metaDateImg.width, metaDateImg.height);
+  }
+
+  const metaPatImg = renderTextToImage(`${t.patient}: ${patientName}`, 8, false, halfWidth, '#475569');
+  if (metaPatImg) {
+    doc.addImage(metaPatImg.data, 'PNG', margin + halfWidth + 6, y + 2, metaPatImg.width, metaPatImg.height);
+  }
+
+  y += 14;
+
+  // 3. MAIN SPECIMEN & DIAGNOSTIC CARD
+  const cardStartY = y;
+  const imageDim = 46; // 46mm square image
+
+  // Left Column: Specimen Image
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(margin, cardStartY, imageDim, imageDim, 3, 3, 'FD');
+
+  try {
+    doc.addImage(image, 'JPEG', margin + 1.5, cardStartY + 1.5, imageDim - 3, imageDim - 3);
+  } catch (err) {
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text("[Specimen Image]", margin + 8, cardStartY + 23);
+  }
+
+  // Right Column: Findings
+  const rightColX = margin + imageDim + 8;
+  const rightColWidth = contentWidth - imageDim - 8;
+  let rightY = cardStartY;
+
+  // Condition Name
+  const conditionImg = renderTextToImage(analysis.condition, 13.5, true, rightColWidth, '#0f172a');
+  if (conditionImg) {
+    doc.addImage(conditionImg.data, 'PNG', rightColX, rightY, conditionImg.width, conditionImg.height);
+    rightY += conditionImg.height + 2;
+  } else {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(15, 23, 42);
+    doc.text(analysis.condition, rightColX, rightY + 4);
+    rightY += 8;
+  }
+
+  // Confidence & Severity Pill Row
+  const probPercent = Math.round(analysis.probability * 100);
+  const metaBadgeText = `${t.confidence}: ${probPercent}%  |  ${t.severity}: ${analysis.severity}`;
+  const badgeImg = renderTextToImage(metaBadgeText, 9, true, rightColWidth, '#0f766e');
+  if (badgeImg) {
+    doc.addImage(badgeImg.data, 'PNG', rightColX, rightY, badgeImg.width, badgeImg.height);
+    rightY += badgeImg.height + 2;
+  } else {
+    rightY += 5;
+  }
+
+  // Anatomical Localization
+  if (analysis.localization) {
+    const locText = `${t.localization}: ${analysis.localization}`;
+    const locImg = renderTextToImage(locText, 8.5, false, rightColWidth, '#334155');
+    if (locImg) {
+      doc.addImage(locImg.data, 'PNG', rightColX, rightY, locImg.width, locImg.height);
+      rightY += locImg.height + 2;
+    }
+  }
+
+  // Key Clinical Features
+  if (analysis.features && analysis.features.length > 0) {
+    const feats = analysis.features.slice(0, 3);
+    for (const feat of feats) {
+      const featImg = renderTextToImage(`• ${feat}`, 8, false, rightColWidth, '#64748b');
+      if (featImg) {
+        doc.addImage(featImg.data, 'PNG', rightColX, rightY, featImg.width, featImg.height);
+        rightY += featImg.height + 1;
+      }
+    }
+  }
+
+  // Calculate safe next Y coordinate
+  y = Math.max(cardStartY + imageDim + 8, rightY + 6);
+
+  // 4. RECOMMENDATIONS & ACTION PLAN SECTION
+  doc.setFillColor(240, 253, 250); // teal-50
+  doc.setDrawColor(204, 251, 241); // teal-100
+  
+  // Section Header
+  const adviceHeaderImg = renderTextToImage(t.advice, 11, true, contentWidth, '#0f766e');
+  if (adviceHeaderImg) {
+    doc.addImage(adviceHeaderImg.data, 'PNG', margin, y, adviceHeaderImg.width, adviceHeaderImg.height);
+    y += adviceHeaderImg.height + 3;
+  } else {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(15, 118, 110);
+    doc.text(t.advice, margin, y + 4);
+    y += 7;
+  }
+
+  // Divider under advice header
+  doc.setDrawColor(204, 251, 241);
+  doc.line(margin, y, margin + contentWidth, y);
+  y += 4;
+
+  // Numbered points
+  const points = parseRecommendationPoints(analysis.recommendation);
+  const pointWidth = contentWidth - 4;
+
+  if (points.length > 0) {
+    points.forEach((point, idx) => {
+      const pointText = `${idx + 1}. ${point}`;
+      const itemImg = renderTextToImage(pointText, 9.5, false, pointWidth, '#1e293b');
+
+      if (itemImg) {
+        // Page overflow check
+        if (y + itemImg.height > pageHeight - 34) {
+          doc.addPage();
+          y = 16;
+        }
+
+        doc.addImage(itemImg.data, 'PNG', margin + 2, y, itemImg.width, itemImg.height);
+        y += itemImg.height + 3;
       }
     });
-  }
-
-  // Image Section
-  y += 15;
-  try {
-    // Prominent image size (adjusting Y to avoid overlap)
-    doc.addImage(image, 'JPEG', margin, y, 85, 85);
-    y += 95;
-  } catch (e) {
-    console.error("Error adding image to PDF", e);
-    y += 10;
-    doc.text("[Image processing failed]", margin, y);
-    y += 10;
-  }
-
-  // Advice Section
-  y += 10;
-  doc.setFont("helvetica", "bold");
-  if (isIndic) {
-    const advLabelImg = renderIndicText(`${t.advice}:`, 14, true, 120);
-    if (advLabelImg) doc.addImage(advLabelImg.data, 'PNG', margin, y - 8, advLabelImg.width, advLabelImg.height);
   } else {
-    doc.text(`${t.advice}:`, margin, y);
-  }
-  
-  y += 12;
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "normal");
-  
-  if (isIndic) {
-    const advValImg = renderIndicText(analysis.recommendation, 11, false, pageWidth - (margin * 2));
-    if (advValImg) {
-      doc.addImage(advValImg.data, 'PNG', margin, y - 5, advValImg.width, advValImg.height);
-      y += advValImg.height;
+    const fallbackImg = renderTextToImage(analysis.recommendation, 9.5, false, pointWidth, '#1e293b');
+    if (fallbackImg) {
+      if (y + fallbackImg.height > pageHeight - 34) {
+        doc.addPage();
+        y = 16;
+      }
+      doc.addImage(fallbackImg.data, 'PNG', margin + 2, y, fallbackImg.width, fallbackImg.height);
+      y += fallbackImg.height + 4;
     }
-  } else {
-    const lines = doc.splitTextToSize(analysis.recommendation, pageWidth - (margin * 2));
-    doc.text(lines, margin, y);
-    y += lines.length * 6;
   }
 
-  // Footer
-  doc.setFontSize(9);
-  doc.setTextColor(220, 38, 38); // Red color for urgency
-  doc.setFont("helvetica", "bold");
-  const footerY = doc.internal.pageSize.getHeight() - 40;
-  
-  if (isIndic) {
-    const discImg = renderIndicText(t.disclaimer, 9, true, pageWidth - (margin * 2));
-    if (discImg) doc.addImage(discImg.data, 'PNG', margin, footerY, discImg.width, discImg.height);
-  } else {
-    const wrappedEthical = doc.splitTextToSize(t.disclaimer, pageWidth - (margin * 2));
-    doc.text(wrappedEthical, margin, footerY);
-  }
+  // 5. PROFESSIONAL FOOTER (Anchored at page bottom)
+  const drawFooter = () => {
+    const footerY = pageHeight - 24;
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, footerY, margin + contentWidth, footerY);
 
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(150);
-  if (isIndic) {
-    const warnImg = renderIndicText(t.warning, 8, false, pageWidth - (margin * 2));
-    if (warnImg) doc.addImage(warnImg.data, 'PNG', margin, footerY + 20, warnImg.width, warnImg.height);
-  } else {
-    doc.text(t.warning, margin, footerY + 18);
-  }
+    const discImg = renderTextToImage(t.disclaimer, 7.5, true, contentWidth, '#dc2626');
+    if (discImg) {
+      doc.addImage(discImg.data, 'PNG', margin, footerY + 2, discImg.width, discImg.height);
+    }
+
+    const warnImg = renderTextToImage(t.warning, 7, false, contentWidth, '#64748b');
+    if (warnImg) {
+      doc.addImage(warnImg.data, 'PNG', margin, footerY + 9, warnImg.width, warnImg.height);
+    }
+  };
+
+  drawFooter();
 
   // Save the PDF
-  const filename = `Dermal_Report_${analysis.condition.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`;
+  const safeCondition = (analysis.condition || "Skin_Report").replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `DermAI_Report_${safeCondition}_${Date.now()}.pdf`;
   doc.save(filename);
 }

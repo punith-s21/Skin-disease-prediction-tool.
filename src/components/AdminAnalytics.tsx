@@ -7,12 +7,12 @@ import {
   Shield, Activity, Users, Calendar, AlertTriangle, Info, Download, 
   Search, RefreshCw, Layers, CheckCircle2, ArrowUpRight, Filter, Clock,
   ChevronRight, Database, Server, Cpu, Mail, Lock, Key, UserPlus, LogOut,
-  Eye, EyeOff, X, Check, Trash2, HardDrive, DatabaseZap, AlertOctagon, Sparkles
+  Eye, EyeOff, X, Check, Trash2, HardDrive, DatabaseZap, AlertOctagon, Sparkles, Eraser, UserX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, doc, setDoc, deleteDoc, getDocs, writeBatch, where } from 'firebase/firestore';
-import { db, signInWithEmail, signUpWithEmail, signOutUser, getActiveUserSession, AppUserSession } from '../lib/firebase';
+import { db, signInWithEmail, signUpWithEmail, signOutUser, getActiveUserSession, AppUserSession, getStoredAccounts, saveStoredAccount, deleteStoredAccount, clearAllStoredAccounts } from '../lib/firebase';
 import { PredictionLog, UserProfile, DateRangeOption, Severity } from '../types';
 
 interface AdminAnalyticsProps {
@@ -78,7 +78,7 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
   const [isPurging, setIsPurging] = useState<boolean>(false);
   const [purgeSuccess, setPurgeSuccess] = useState<string>('');
   const [purgeError, setPurgeError] = useState<string>('');
-  const [selectedStorageAction, setSelectedStorageAction] = useState<'all_logs' | 'older_30d' | 'older_7d' | 'device_cache' | 'deep_wipe' | null>(null);
+  const [selectedStorageAction, setSelectedStorageAction] = useState<'all_logs' | 'all_users' | 'older_30d' | 'older_7d' | 'device_cache' | 'deep_wipe' | null>(null);
   const [isConfirmingPurge, setIsConfirmingPurge] = useState<boolean>(false);
 
   // Local storage metrics
@@ -104,13 +104,58 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
   // Single Log Delete
   const handleDeleteSingleLog = async (logId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!confirm("Permanently delete this individual prediction record from storage?")) return;
     try {
       await deleteDoc(doc(db, 'predictions', logId));
     } catch (err) {
       console.warn('Firestore delete single record fallback:', err);
     }
     setPredictionLogs(prev => prev.filter(l => l.id !== logId));
+  };
+
+  // Single User Account Delete
+  const handleDeleteSingleUser = async (userId: string, userEmail: string, displayName?: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      try {
+        await deleteDoc(doc(db, 'user_profiles', userId));
+      } catch (err) {
+        console.warn('Firestore delete user fallback:', err);
+      }
+      deleteStoredAccount(userEmail);
+      deleteStoredAccount(userId);
+      setUserProfiles(prev => prev.filter(u => u.id !== userId && u.email.toLowerCase() !== userEmail.toLowerCase()));
+      window.dispatchEvent(new Event('storage'));
+    } catch (err: any) {
+      console.warn("Delete user error:", err);
+    }
+  };
+
+  // Clear individual user's prediction history & activity
+  const handleClearSingleUserHistory = async (userId: string, userEmail: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      const matchingLogs = predictionLogs.filter(l => l.userId === userId || l.userId === userEmail);
+      if (matchingLogs.length > 0) {
+        try {
+          const batch = writeBatch(db);
+          matchingLogs.forEach(l => {
+            batch.delete(doc(db, 'predictions', l.id));
+          });
+          await batch.commit();
+        } catch (err) {
+          console.warn('Firestore batch delete user history fallback:', err);
+        }
+        setPredictionLogs(prev => prev.filter(l => l.userId !== userId && l.userId !== userEmail));
+      }
+      setUserProfiles(prev => prev.map(u => {
+        if (u.id === userId || u.email.toLowerCase() === userEmail.toLowerCase()) {
+          return { ...u, predictionsCount: 0 };
+        }
+        return u;
+      }));
+    } catch (err: any) {
+      console.warn("Clear user history error:", err);
+    }
   };
 
   // Clear All Prediction Logs
@@ -140,6 +185,62 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
       setSelectedStorageAction(null);
     } catch (err: any) {
       setPurgeError(err.message || 'Failed to clear prediction telemetry.');
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
+  // Clear All Registered Users & Activity records
+  const handleClearAllUsers = async () => {
+    setIsPurging(true);
+    setPurgeError('');
+    setPurgeSuccess('');
+    try {
+      try {
+        const snap = await getDocs(collection(db, 'user_profiles'));
+        if (!snap.empty) {
+          const batch = writeBatch(db);
+          snap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (e) {
+        console.warn('Firestore clear users fallback:', e);
+      }
+      clearAllStoredAccounts();
+      localStorage.setItem('dermal_users_cleared', 'true');
+      setUserProfiles([]);
+      setPurgeSuccess('All registered user accounts and activity records have been permanently cleared.');
+      setIsConfirmingPurge(false);
+      setSelectedStorageAction(null);
+      window.dispatchEvent(new Event('storage'));
+    } catch (err: any) {
+      setPurgeError(err.message || 'Failed to clear registered user accounts.');
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
+  // Seed sample users on demand
+  const handleSeedDemoUsers = async () => {
+    setIsPurging(true);
+    setPurgeError('');
+    setPurgeSuccess('');
+    try {
+      const mockUsers = generateMockUsers();
+      try {
+        const batch = writeBatch(db);
+        mockUsers.forEach(u => {
+          batch.set(doc(db, 'user_profiles', u.id), u);
+        });
+        await batch.commit();
+      } catch (e) {
+        console.warn('Seed mock users Firestore fallback:', e);
+      }
+      localStorage.removeItem('dermal_users_cleared');
+      setUserProfiles(mockUsers);
+      setPurgeSuccess(`Seeded ${mockUsers.length} sample registered user accounts.`);
+    } catch (err: any) {
+      setPurgeError(err.message || 'Failed to seed sample user accounts.');
     } finally {
       setIsPurging(false);
     }
@@ -200,12 +301,13 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
     }
   };
 
-  // Deep Storage Reset (Logs + Local History)
+  // Deep Storage Reset (Logs + Registered Users + Local History)
   const handleDeepStorageWipe = async () => {
     setIsPurging(true);
     setPurgeError('');
     setPurgeSuccess('');
     try {
+      // 1. Delete all predictions
       try {
         const snap = await getDocs(collection(db, 'predictions'));
         if (!snap.empty) {
@@ -214,13 +316,30 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
           await batch.commit();
         }
       } catch (e) {
-        console.warn('Deep wipe firestore fallback:', e);
+        console.warn('Deep wipe firestore predictions fallback:', e);
       }
+
+      // 2. Delete all user profiles
+      try {
+        const snapUsers = await getDocs(collection(db, 'user_profiles'));
+        if (!snapUsers.empty) {
+          const batchUsers = writeBatch(db);
+          snapUsers.docs.forEach(d => batchUsers.delete(d.ref));
+          await batchUsers.commit();
+        }
+      } catch (e) {
+        console.warn('Deep wipe firestore users fallback:', e);
+      }
+
+      // 3. Clear local storage states
       setPredictionLogs([]);
+      setUserProfiles([]);
+      clearAllStoredAccounts();
+      localStorage.setItem('dermal_users_cleared', 'true');
       localStorage.removeItem('dermal_history');
       window.dispatchEvent(new Event('storage'));
 
-      setPurgeSuccess('Deep storage reset complete: All telemetry logs, scan records, and cached images permanently deleted.');
+      setPurgeSuccess('Deep storage reset complete: All prediction telemetry, registered user accounts & activity records, and local scan history have been permanently deleted.');
       setIsConfirmingPurge(false);
       setSelectedStorageAction(null);
     } catch (err: any) {
@@ -234,6 +353,8 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
   const handleExecutePurge = async () => {
     if (selectedStorageAction === 'all_logs') {
       await handleClearAllPredictionLogs();
+    } else if (selectedStorageAction === 'all_users') {
+      await handleClearAllUsers();
     } else if (selectedStorageAction === 'older_30d') {
       await handlePruneLogs(30);
     } else if (selectedStorageAction === 'older_7d') {
@@ -294,7 +415,7 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
     setIsAddingUser(true);
     try {
       const userId = `user_${Math.random().toString(36).substr(2, 9)}`;
-      const newUserDoc = {
+      const newUserDoc: UserProfile = {
         id: userId,
         email: newEmail,
         displayName: newName,
@@ -304,10 +425,25 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
         role: newRole
       };
 
-      // Save to Firestore user_profiles
-      await setDoc(doc(db, 'user_profiles', userId), newUserDoc);
+      // Save to local registered accounts
+      saveStoredAccount({
+        uid: userId,
+        email: newEmail,
+        password: newPassword,
+        displayName: newName,
+        role: newRole,
+        createdAt: new Date().toISOString()
+      });
+      localStorage.removeItem('dermal_users_cleared');
 
-      setUserProfiles(prev => [newUserDoc, ...prev]);
+      // Save to Firestore user_profiles
+      try {
+        await setDoc(doc(db, 'user_profiles', userId), newUserDoc);
+      } catch (e) {
+        console.warn('Firestore user save fallback:', e);
+      }
+
+      setUserProfiles(prev => [newUserDoc, ...prev.filter(u => u.email.toLowerCase() !== newEmail.toLowerCase())]);
       setAddUserSuccess(`Added ${newName} (${newRole}) successfully!`);
       setNewEmail('');
       setNewPassword('');
@@ -366,15 +502,56 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
 
       const qUsers = query(collection(db, 'user_profiles'), orderBy('registeredAt', 'desc'));
       unsubUsers = onSnapshot(qUsers, (snapshot) => {
-        const users = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as UserProfile[];
-        if (users.length > 0) {
-          setUserProfiles(users);
-        } else {
+        const firestoreUsers = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as UserProfile[];
+        const localAccounts = getStoredAccounts();
+        const map = new Map<string, UserProfile>();
+
+        firestoreUsers.forEach(u => {
+          if (u.email) map.set(u.email.toLowerCase(), u);
+        });
+
+        localAccounts.forEach(acc => {
+          if (acc.email && !map.has(acc.email.toLowerCase())) {
+            map.set(acc.email.toLowerCase(), {
+              id: acc.uid,
+              email: acc.email,
+              displayName: acc.displayName,
+              registeredAt: acc.createdAt,
+              lastLoginAt: acc.createdAt,
+              role: acc.role,
+              predictionsCount: 0
+            });
+          }
+        });
+
+        const merged = Array.from(map.values());
+        const isExplicitlyCleared = localStorage.getItem('dermal_users_cleared') === 'true';
+
+        if (merged.length > 0) {
+          setUserProfiles(merged);
+        } else if (!isExplicitlyCleared) {
           setUserProfiles(generateMockUsers());
+        } else {
+          setUserProfiles([]);
         }
       }, (err) => {
         console.warn('Firestore user profiles listener error, using fallback:', err);
-        setUserProfiles(generateMockUsers());
+        const localAccounts = getStoredAccounts();
+        if (localAccounts.length > 0) {
+          setUserProfiles(localAccounts.map(acc => ({
+            id: acc.uid,
+            email: acc.email,
+            displayName: acc.displayName,
+            registeredAt: acc.createdAt,
+            lastLoginAt: acc.createdAt,
+            role: acc.role,
+            predictionsCount: 0
+          })));
+        } else if (localStorage.getItem('dermal_users_cleared') !== 'true') {
+          setUserProfiles(generateMockUsers());
+        } else {
+          setUserProfiles([]);
+        }
       });
     } catch (e) {
       console.warn('Firebase error initializing listeners:', e);
@@ -1268,13 +1445,33 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                 />
               </div>
 
-              <div className="flex items-center space-x-3 w-full md:w-auto justify-end">
+              <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
                 <span className="text-xs text-slate-500 font-medium">
                   Showing <strong>{filteredUsers.length}</strong> user records
                 </span>
+
+                {userProfiles.length > 0 ? (
+                  <button
+                    onClick={handleClearAllUsers}
+                    className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer"
+                    title="Permanently wipe all registered user accounts and activity"
+                  >
+                    <UserX size={14} />
+                    <span>Clear All Users</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSeedDemoUsers}
+                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <Sparkles size={14} />
+                    <span>Seed Sample Users</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => setIsAddUserModalOpen(true)}
-                  className="bg-teal-900 hover:bg-teal-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5"
+                  className="bg-teal-900 hover:bg-teal-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer"
                 >
                   <UserPlus size={15} />
                   <span>Add Admin / User</span>
@@ -1285,9 +1482,12 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
             {/* Users Table */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
-                  Registered User Accounts & Activity
-                </h3>
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                    Registered User Accounts & Activity
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Manage clinician accounts, user history records, and individual storage quota</p>
+                </div>
                 <span className="text-[10px] text-slate-400 font-mono">User Tracking Module</span>
               </div>
 
@@ -1299,42 +1499,96 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                       <th className="px-6 py-3">Role</th>
                       <th className="px-6 py-3">Registered At</th>
                       <th className="px-6 py-3">Last Active</th>
-                      <th className="px-6 py-3 text-right">Predictions Run</th>
+                      <th className="px-6 py-3 text-center">Predictions Run</th>
+                      <th className="px-6 py-3 text-right">Individual Storage Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {filteredUsers.map((u) => (
-                      <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center space-x-3">
-                            <div className="w-8 h-8 rounded-full bg-teal-900 text-white font-bold text-xs flex items-center justify-center">
-                              {(u.displayName || u.email)[0].toUpperCase()}
-                            </div>
-                            <div>
-                              <p className="font-bold text-slate-900">{u.displayName || "Clinic User"}</p>
-                              <p className="text-[11px] text-slate-400 font-mono">{u.email}</p>
-                            </div>
+                    {filteredUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-12 text-center text-slate-400 space-y-3">
+                          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                            <Users size={22} />
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-700 text-sm">No registered user accounts found in storage</p>
+                            <p className="text-xs text-slate-400">All accounts have been cleared or no matching search results.</p>
+                          </div>
+                          <div className="flex items-center justify-center gap-3 pt-2">
+                            <button
+                              onClick={handleSeedDemoUsers}
+                              className="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 text-xs font-bold rounded-xl transition-all cursor-pointer inline-flex items-center space-x-1.5"
+                            >
+                              <Sparkles size={14} />
+                              <span>Seed Sample Clinicians</span>
+                            </button>
+                            <button
+                              onClick={() => setIsAddUserModalOpen(true)}
+                              className="px-4 py-2 bg-teal-900 hover:bg-teal-800 text-white text-xs font-bold rounded-xl transition-all cursor-pointer inline-flex items-center space-x-1.5"
+                            >
+                              <UserPlus size={14} />
+                              <span>Create New User</span>
+                            </button>
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase ${
-                            u.role === 'Admin' ? 'bg-purple-100 text-purple-800' :
-                            u.role === 'Dermatologist' ? 'bg-indigo-100 text-indigo-800' : 'bg-teal-100 text-teal-800'
-                          }`}>
-                            {u.role || 'Clinic Worker'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-slate-500 font-mono text-[11px]">
-                          {new Date(u.registeredAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 text-slate-500 font-mono text-[11px]">
-                          {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Recently'}
-                        </td>
-                        <td className="px-6 py-4 text-right font-black text-slate-900">
-                          {u.predictionsCount || Math.floor(Math.random() * 18) + 2}
-                        </td>
                       </tr>
-                    ))}
+                    ) : (
+                      filteredUsers.map((u) => (
+                        <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-8 h-8 rounded-full bg-teal-900 text-white font-bold text-xs flex items-center justify-center flex-shrink-0">
+                                {(u.displayName || u.email || 'U')[0].toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-bold text-slate-900">{u.displayName || "Clinic User"}</p>
+                                <p className="text-[11px] text-slate-400 font-mono">{u.email}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase ${
+                              u.role === 'Admin' ? 'bg-purple-100 text-purple-800' :
+                              u.role === 'Dermatologist' ? 'bg-indigo-100 text-indigo-800' : 'bg-teal-100 text-teal-800'
+                            }`}>
+                              {u.role || 'Clinic Worker'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-slate-500 font-mono text-[11px]">
+                            {new Date(u.registeredAt).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 text-slate-500 font-mono text-[11px]">
+                            {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Recently'}
+                          </td>
+                          <td className="px-6 py-4 text-center font-black text-slate-900">
+                            {u.predictionsCount ?? 0}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end space-x-2">
+                              {/* Individual Clear Activity */}
+                              <button
+                                type="button"
+                                onClick={(e) => handleClearSingleUserHistory(u.id, u.email, e)}
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors border border-transparent hover:border-amber-200 cursor-pointer"
+                                title={`Clear scan & prediction history for ${u.email}`}
+                              >
+                                <Eraser size={15} />
+                              </button>
+
+                              {/* Individual Delete User */}
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteSingleUser(u.id, u.email, u.displayName, e)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200 cursor-pointer"
+                                title={`Permanently delete user ${u.email}`}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1766,31 +2020,40 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
               </div>
 
               {/* Storage Overview Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
                   <div className="flex items-center justify-between text-slate-400">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Prediction Logs</span>
-                    <Database size={14} className="text-teal-600" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Logs</span>
+                    <Database size={13} className="text-teal-600" />
                   </div>
-                  <p className="text-lg font-black text-slate-900">{predictionLogs.length}</p>
-                  <p className="text-[10px] text-slate-500 font-mono">~{estimatedFirestoreKB} KB stored</p>
+                  <p className="text-base font-black text-slate-900">{predictionLogs.length}</p>
+                  <p className="text-[10px] text-slate-500 font-mono">~{estimatedFirestoreKB} KB</p>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
                   <div className="flex items-center justify-between text-slate-400">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Local Photos</span>
-                    <Layers size={14} className="text-amber-600" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Users</span>
+                    <Users size={13} className="text-indigo-600" />
                   </div>
-                  <p className="text-lg font-black text-slate-900">{localCasesCount} cases</p>
-                  <p className="text-[10px] text-slate-500 font-mono">~{estimatedLocalKB} KB cache</p>
+                  <p className="text-base font-black text-slate-900">{userProfiles.length}</p>
+                  <p className="text-[10px] text-slate-500 font-mono">Accounts</p>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
                   <div className="flex items-center justify-between text-slate-400">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Total Usage</span>
-                    <Server size={14} className="text-indigo-600" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Photos</span>
+                    <Layers size={13} className="text-amber-600" />
                   </div>
-                  <p className="text-lg font-black text-slate-900">~{totalEstimatedStorageKB} KB</p>
+                  <p className="text-base font-black text-slate-900">{localCasesCount}</p>
+                  <p className="text-[10px] text-slate-500 font-mono">~{estimatedLocalKB} KB</p>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Total</span>
+                    <Server size={13} className="text-purple-600" />
+                  </div>
+                  <p className="text-base font-black text-slate-900">~{totalEstimatedStorageKB} KB</p>
                   <p className="text-[10px] text-emerald-600 font-bold">Optimizable</p>
                 </div>
               </div>
@@ -1823,6 +2086,9 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                         {selectedStorageAction === 'all_logs' && (
                           <span>This will permanently delete all {predictionLogs.length} prediction records from the Firestore database. Model telemetry history will be reset.</span>
                         )}
+                        {selectedStorageAction === 'all_users' && (
+                          <span>This will permanently delete all {userProfiles.length} registered clinician &amp; user accounts from storage and reset user tracking records.</span>
+                        )}
                         {selectedStorageAction === 'older_30d' && (
                           <span>This will delete all telemetry records older than 30 days. Recent 30-day analytics will be preserved.</span>
                         )}
@@ -1833,7 +2099,7 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                           <span>This will delete {localCasesCount} local case evaluations and base64 lesion photos stored in this browser to free device quota.</span>
                         )}
                         {selectedStorageAction === 'deep_wipe' && (
-                          <span>This will perform a full reset: permanently clearing all database prediction telemetry AND deleting all local device case archives.</span>
+                          <span>This will perform a full reset: permanently clearing all database prediction telemetry AND deleting all registered user accounts AND deleting all local device case archives.</span>
                         )}
                       </p>
                     </div>
@@ -1896,7 +2162,27 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                     </button>
                   </div>
 
-                  {/* Action 2: Prune > 30 Days */}
+                  {/* Action 2: Clear All Users */}
+                  <div className="p-4 border border-slate-200 hover:border-red-300 rounded-2xl flex items-center justify-between gap-3 transition-colors bg-white">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center space-x-2">
+                        <Users size={15} className="text-indigo-600" />
+                        <h4 className="text-xs font-bold text-slate-900">Clear Registered User Accounts &amp; Activity</h4>
+                      </div>
+                      <p className="text-[11px] text-slate-500">Deletes all {userProfiles.length} clinician accounts from database &amp; storage records</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedStorageAction('all_users');
+                        setIsConfirmingPurge(true);
+                      }}
+                      className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl transition-all flex-shrink-0 cursor-pointer"
+                    >
+                      Clear Users
+                    </button>
+                  </div>
+
+                  {/* Action 3: Prune > 30 Days */}
                   <div className="p-4 border border-slate-200 hover:border-amber-300 rounded-2xl flex items-center justify-between gap-3 transition-colors bg-white">
                     <div className="space-y-0.5">
                       <div className="flex items-center space-x-2">
@@ -1916,7 +2202,7 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                     </button>
                   </div>
 
-                  {/* Action 3: Prune > 7 Days */}
+                  {/* Action 4: Prune > 7 Days */}
                   <div className="p-4 border border-slate-200 hover:border-amber-300 rounded-2xl flex items-center justify-between gap-3 transition-colors bg-white">
                     <div className="space-y-0.5">
                       <div className="flex items-center space-x-2">
@@ -1936,7 +2222,7 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                     </button>
                   </div>
 
-                  {/* Action 4: Clear Device Image Cache */}
+                  {/* Action 5: Clear Device Image Cache */}
                   <div className="p-4 border border-slate-200 hover:border-teal-300 rounded-2xl flex items-center justify-between gap-3 transition-colors bg-white">
                     <div className="space-y-0.5">
                       <div className="flex items-center space-x-2">
@@ -1956,14 +2242,14 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
                     </button>
                   </div>
 
-                  {/* Action 5: Deep Storage Reset */}
+                  {/* Action 6: Deep Storage Reset */}
                   <div className="p-4 border border-red-200 bg-red-50/40 rounded-2xl flex items-center justify-between gap-3 transition-colors">
                     <div className="space-y-0.5">
                       <div className="flex items-center space-x-2">
                         <Trash2 size={15} className="text-red-600" />
                         <h4 className="text-xs font-bold text-red-900">Deep Storage Reset (Full Wipe)</h4>
                       </div>
-                      <p className="text-[11px] text-red-700/80">Wipes all database logs + local scan archives simultaneously</p>
+                      <p className="text-[11px] text-red-700/80">Wipes all database logs + registered user accounts + local scan archives simultaneously</p>
                     </div>
                     <button
                       onClick={() => {

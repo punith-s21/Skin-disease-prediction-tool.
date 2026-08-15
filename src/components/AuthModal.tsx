@@ -93,7 +93,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setSuccessMessage('');
       }, 900);
     } catch (err: any) {
-      console.error('User auth error:', err);
       if (err.code === 'auth/wrong-password') {
         setErrorMessage('Incorrect password. Try ClinicWorker123! or register.');
       } else if (err.code === 'auth/invalid-email') {
@@ -138,11 +137,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setSuccessMessage('');
       }, 900);
     } catch (err: any) {
-      console.error('Admin auth error:', err);
       if (err.code === 'auth/wrong-password') {
         setErrorMessage('Incorrect admin password. Please check your credentials.');
       } else {
-        setErrorMessage(err.message || 'Admin authentication failed.');
+        setErrorMessage(err.message || 'Admin authentication failed. Access restricted to authorized administrators.');
       }
     } finally {
       setIsLoading(false);

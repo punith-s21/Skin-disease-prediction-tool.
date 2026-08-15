@@ -157,17 +157,17 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Sync with Firestore history if logged in with real Firebase Auth
+  // Sync with Firestore history if logged in with Firebase Auth or user session
   useEffect(() => {
-    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
+    const effectiveUserId = user?.uid || (auth.currentUser ? auth.currentUser.uid : null);
 
-    if (!isRealFirebaseAuth) {
+    if (!effectiveUserId) {
       const saved = localStorage.getItem('dermal_history');
       setHistory(saved ? JSON.parse(saved) : []);
       return;
     }
 
-    const historyPath = `users/${user.uid}/history`;
+    const historyPath = `users/${effectiveUserId}/history`;
     const q = query(
       collection(db, historyPath),
       orderBy('timestamp', 'desc')
@@ -179,7 +179,6 @@ export default function App() {
         id: doc.id
       })) as HistoryItem[];
       setHistory(items);
-      // Keep local backup synchronized
       localStorage.setItem('dermal_history', JSON.stringify(items));
     }, (error) => {
       console.warn("Firestore history sync note:", error);
@@ -190,10 +189,19 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(prev => prev?.message === message ? null : prev);
+    }, 4000);
+  };
+
   const saveToHistory = async (newAnalysis: Analysis, image: string) => {
     const timestamp = new Date().toISOString();
     const newItem: HistoryItem = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: `scan_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       image,
       analysis: newAnalysis,
       timestamp,
@@ -202,11 +210,12 @@ export default function App() {
     };
 
     // 1. Log prediction event for global usage analytics
-    const predId = `pred_${Math.random().toString(36).substr(2, 9)}`;
+    const predId = `pred_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     try {
       await setDoc(doc(db, 'predictions', predId), {
         id: predId,
-        userId: user ? user.uid : 'anon_worker',
+        userId: user ? user.uid : (userSession?.id || 'anon_worker'),
+        userEmail: user?.email || (userSession?.email || 'Clinic Anonymous'),
         condition: newAnalysis.condition,
         probability: newAnalysis.probability,
         severity: newAnalysis.severity,
@@ -223,13 +232,13 @@ export default function App() {
     localStorage.setItem('dermal_history', JSON.stringify(updated));
 
     // 3. Save to Firestore if authenticated
-    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
-    if (isRealFirebaseAuth) {
-      const historyPath = `users/${user.uid}/history`;
+    const effectiveUserId = user?.uid || (auth.currentUser ? auth.currentUser.uid : null);
+    if (effectiveUserId) {
+      const historyPath = `users/${effectiveUserId}/history`;
       try {
         await setDoc(doc(db, historyPath, newItem.id), {
           ...newItem,
-          userId: user.uid,
+          userId: effectiveUserId,
           timestamp: timestamp
         });
       } catch (error) {
@@ -239,16 +248,18 @@ export default function App() {
   };
 
   const deleteHistoryItem = async (id: string) => {
+    // 1. Update local state immediately for instant responsive UI
     const updated = history.filter(item => item.id !== id);
     setHistory(updated);
     localStorage.setItem('dermal_history', JSON.stringify(updated));
     window.dispatchEvent(new Event('storage'));
+    showToast("Case record deleted from history.", "info");
 
-    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
-    if (isRealFirebaseAuth) {
-      const path = `users/${user.uid}/history/${id}`;
+    // 2. Delete from Firestore if user has account or session
+    const effectiveUserId = user?.uid || (auth.currentUser ? auth.currentUser.uid : null);
+    if (effectiveUserId) {
       try {
-        await deleteDoc(doc(db, `users/${user.uid}/history`, id));
+        await deleteDoc(doc(db, `users/${effectiveUserId}/history`, id));
       } catch (error) {
         console.warn('Firestore history delete error:', error);
       }
@@ -260,18 +271,19 @@ export default function App() {
     setHistory([]);
     localStorage.removeItem('dermal_history');
     window.dispatchEvent(new Event('storage'));
+    showToast("All case records have been cleared.", "info");
 
     // 2. Clear cloud history for user in Firestore
-    const isRealFirebaseAuth = user && auth.currentUser && auth.currentUser.uid === user.uid;
-    if (isRealFirebaseAuth) {
-      const historyPath = `users/${user.uid}/history`;
+    const effectiveUserId = user?.uid || (auth.currentUser ? auth.currentUser.uid : null);
+    if (effectiveUserId) {
+      const historyPath = `users/${effectiveUserId}/history`;
       try {
         const q = query(collection(db, historyPath));
         const snapshot = await getDocs(q);
         if (!snapshot.empty) {
           const batch = writeBatch(db);
-          snapshot.docs.forEach((doc) => {
-            batch.delete(doc.ref);
+          snapshot.docs.forEach((d) => {
+            batch.delete(d.ref);
           });
           await batch.commit();
         }
@@ -306,8 +318,10 @@ export default function App() {
       const result = await analyzeSkinCondition(capturedImage, voiceDescription, skinTone, "India", langEnum);
       setAnalysis(result);
       saveToHistory(result, capturedImage);
-    } catch (err) {
-      alert("Analysis failed. Please try again.");
+      showToast("Evaluation complete: " + result.condition, "success");
+    } catch (err: any) {
+      console.warn("Analysis error note:", err);
+      showToast("Clinical analysis failed. Please ensure image is clear and try again.", "error");
     } finally {
       setIsAnalyzing(false);
     }
@@ -331,10 +345,11 @@ export default function App() {
         location: "Maharashtra-Rural",
         timestamp: new Date().toISOString()
       });
-      alert("Reported successfully to community surveillance.");
+      showToast("Reported successfully to Community Surveillance.", "success");
       resetScanner();
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, alertPath);
+      showToast("Failed to report to community surveillance.", "error");
     }
   };
 
@@ -642,6 +657,35 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      {/* Toast Notification Banner */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-[90%]"
+          >
+            <div className={cn(
+              "px-4 py-3 rounded-2xl shadow-xl border flex items-center justify-between space-x-3 text-sm font-semibold backdrop-blur-md",
+              toast.type === 'success' 
+                ? "bg-teal-900/90 text-white border-teal-500/30" 
+                : toast.type === 'error'
+                ? "bg-red-900/90 text-white border-red-500/30"
+                : "bg-slate-900/90 text-white border-slate-700/50"
+            )}>
+              <span className="leading-snug">{toast.message}</span>
+              <button 
+                onClick={() => setToast(null)}
+                className="text-white/70 hover:text-white text-xs px-2 py-1 rounded-lg bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AuthModal
         isOpen={isAuthModalOpen}

@@ -15,6 +15,46 @@ interface AnalysisResultProps {
   language: string;
 }
 
+export function parseRecommendationPoints(raw: string): string[] {
+  if (!raw) return [];
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const points: string[] = [];
+
+  for (const line of lines) {
+    let clean = line.replace(/^\*\*.*?\*\*:\s*/, '').trim();
+    if (!clean) continue;
+
+    const bulletMatch = clean.match(/^[-*•\d\.\)]+\s*(.*)$/);
+    if (bulletMatch && bulletMatch[1].trim()) {
+      clean = bulletMatch[1].trim();
+    }
+
+    if (clean.includes('. ') && clean.length > 90) {
+      const sentences = clean
+        .split(/(?<=[.?!])\s+(?=[A-Z0-9\u0900-\u0DFF])/g)
+        .map(s => s.trim().replace(/^[-*•\d\.\)]+\s*/, ''))
+        .filter(s => s.length > 5);
+      if (sentences.length > 1) {
+        points.push(...sentences);
+        continue;
+      }
+    }
+
+    if (clean.length > 0) {
+      points.push(clean);
+    }
+  }
+
+  if (points.length === 0) {
+    return raw
+      .split(/(?<=[.?!])\s+/g)
+      .map(s => s.replace(/^[-*•\d\.\)]+\s*/, '').trim())
+      .filter(s => s.length > 5);
+  }
+
+  return points;
+}
+
 export const AnalysisResult: React.FC<AnalysisResultProps> = ({ 
   analysis, 
   image, 
@@ -23,6 +63,12 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
   language
 }) => {
   const [isSpeaking, setIsSpeaking] = React.useState(false);
+  const recommendationPoints = React.useMemo(() => {
+    return parseRecommendationPoints(analysis.recommendation);
+  }, [analysis.recommendation]);
+
+  const [downloadStatus, setDownloadStatus] = React.useState<'idle' | 'generating' | 'downloaded' | 'error'>('idle');
+  const [speechNotice, setSpeechNotice] = React.useState<string | null>(null);
 
   // Clean up any speech on unmount
   useEffect(() => {
@@ -36,19 +82,27 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
   const startSound = () => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
+      setSpeechNotice(null);
 
-      const cleanText = `${analysis.condition}. ${analysis.recommendation.replace(/[#*`_>~-]/g, '')}`;
+      const spokenPoints = recommendationPoints.length > 0 
+        ? recommendationPoints.join('. ') 
+        : analysis.recommendation.replace(/[#*`_>~-]/g, '');
+      const cleanText = `${analysis.condition}. Primary Recommendation: ${spokenPoints}`;
       const utterance = new SpeechSynthesisUtterance(cleanText);
       
       utterance.lang = language || 'en-US';
       
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onerror = (e) => {
+        console.warn("Speech synthesis playback event:", e);
+        setIsSpeaking(false);
+      };
 
       window.speechSynthesis.speak(utterance);
     } else {
-      alert("Speech synthesis is not supported in this browser.");
+      setSpeechNotice("Speech playback is not supported on this browser.");
+      setTimeout(() => setSpeechNotice(null), 4000);
     }
   };
 
@@ -78,6 +132,7 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
   };
 
   const handleDownloadReport = async () => {
+    setDownloadStatus('generating');
     try {
       await generatePDFReport(
         analysis, 
@@ -86,9 +141,12 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
         new Date().toLocaleString(),
         language
       );
+      setDownloadStatus('downloaded');
+      setTimeout(() => setDownloadStatus('idle'), 3500);
     } catch (err) {
-      console.error("PDF Export failed", err);
-      alert("Failed to generate PDF. Please check your browser permissions.");
+      console.warn("PDF Export note:", err);
+      setDownloadStatus('error');
+      setTimeout(() => setDownloadStatus('idle'), 4000);
     }
   };
 
@@ -178,8 +236,32 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
                   </button>
                 </div>
               </div>
-              <div className="text-clinical-text/70 text-sm leading-relaxed prose prose-sm max-w-none prose-p:mb-2 last:prose-p:mb-0">
-                <ReactMarkdown>{analysis.recommendation}</ReactMarkdown>
+
+              {speechNotice && (
+                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-medium">
+                  {speechNotice}
+                </div>
+              )}
+              <div className="space-y-2.5">
+                {recommendationPoints.length > 0 ? (
+                  recommendationPoints.map((point, idx) => (
+                    <div 
+                      key={idx}
+                      className="flex items-start space-x-3 bg-white rounded-2xl p-3.5 border border-clinical-border shadow-2xs transition-all hover:border-clinical-primary/30"
+                    >
+                      <div className="w-5 h-5 rounded-full bg-clinical-primary/10 text-clinical-primary flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-0.5">
+                        {idx + 1}
+                      </div>
+                      <p className="text-clinical-text/80 text-xs sm:text-sm leading-relaxed font-medium">
+                        {point}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-clinical-text/70 text-sm leading-relaxed prose prose-sm max-w-none">
+                    <ReactMarkdown>{analysis.recommendation}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -192,11 +274,28 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
                 <span>Report to Cluster</span>
               </button>
               <button 
+                type="button"
                 onClick={handleDownloadReport}
-                className="bg-clinical-primary/5 text-clinical-primary border border-clinical-primary/20 rounded-2xl py-6 font-bold active:scale-95 transition-all flex items-center justify-center space-x-2"
+                disabled={downloadStatus === 'generating'}
+                className={cn(
+                  "rounded-2xl py-6 font-bold active:scale-95 transition-all flex items-center justify-center space-x-2 cursor-pointer border",
+                  downloadStatus === 'downloaded' 
+                    ? "bg-green-50 text-green-700 border-green-300"
+                    : downloadStatus === 'error'
+                    ? "bg-red-50 text-red-700 border-red-300"
+                    : "bg-clinical-primary/5 text-clinical-primary border-clinical-primary/20 hover:bg-clinical-primary/10"
+                )}
               >
-                <FileDown size={18} />
-                <span>Download Report</span>
+                <FileDown size={18} className={downloadStatus === 'generating' ? 'animate-bounce' : ''} />
+                <span>
+                  {downloadStatus === 'generating' 
+                    ? 'Generating PDF...' 
+                    : downloadStatus === 'downloaded'
+                    ? 'PDF Downloaded!'
+                    : downloadStatus === 'error'
+                    ? 'Download Failed'
+                    : 'Download Report'}
+                </span>
               </button>
             </div>
 

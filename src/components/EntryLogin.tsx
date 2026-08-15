@@ -78,7 +78,6 @@ export const EntryLogin: React.FC<EntryLoginProps> = ({
         onSuccess(loggedUser);
       }, 700);
     } catch (err: any) {
-      console.error('User auth error:', err);
       if (err.code === 'auth/wrong-password') {
         setErrorMessage('Incorrect password. Try ClinicWorker123! or register new account.');
       } else if (err.code === 'auth/invalid-email') {
@@ -98,15 +97,15 @@ export const EntryLogin: React.FC<EntryLoginProps> = ({
     setIsLoading(true);
 
     try {
-      const loggedUser = await signInWithEmail(adminEmail, adminPassword, 'Admin', 'Admin Surveillance Officer');
+      const loggedUser = await signInWithEmail(adminEmail, adminPassword, 'Admin', 'Director of Epidemiology (Admin)');
       
       // Sync Admin profile to Firestore
       try {
         const uid = loggedUser.uid;
         await setDoc(doc(db, 'user_profiles', uid), {
           id: uid,
-          email: adminEmail,
-          displayName: 'Admin Surveillance Officer',
+          email: adminEmail || 'admin@dermai.org',
+          displayName: 'Director of Epidemiology (System Admin)',
           role: 'Admin',
           registeredAt: new Date().toISOString(),
           lastLoginAt: new Date().toISOString()
@@ -119,13 +118,12 @@ export const EntryLogin: React.FC<EntryLoginProps> = ({
       window.dispatchEvent(new Event('storage'));
       setTimeout(() => {
         onSuccess(loggedUser);
-      }, 700);
+      }, 500);
     } catch (err: any) {
-      console.error('Admin auth error:', err);
       if (err.code === 'auth/wrong-password') {
-        setErrorMessage('Incorrect admin password. Please check your credentials.');
+        setErrorMessage('Incorrect admin password. (Default: AdminPassword123!)');
       } else {
-        setErrorMessage(err.message || 'Admin authentication failed.');
+        setErrorMessage(err.message || 'Admin authentication failed. Access restricted to authorized administrators.');
       }
     } finally {
       setIsLoading(false);
@@ -529,6 +527,21 @@ export const EntryLogin: React.FC<EntryLoginProps> = ({
                     <span>{successMessage}</span>
                   </div>
                 )}
+
+                {/* Admin Quick Fill Helper */}
+                <div className="bg-teal-50/80 border border-teal-200/70 rounded-2xl p-3.5 flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <p className="text-[11px] font-bold text-teal-900">Administrator Access</p>
+                    <p className="text-[10px] text-teal-700 font-mono">admin@dermai.org / AdminPassword123!</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fillAdminDemo}
+                    className="px-2.5 py-1.5 bg-teal-800 hover:bg-teal-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95"
+                  >
+                    Auto-Fill
+                  </button>
+                </div>
 
                 <button
                   type="submit"

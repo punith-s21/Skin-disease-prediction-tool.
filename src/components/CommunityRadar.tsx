@@ -44,7 +44,10 @@ export const CommunityRadar: React.FC = () => {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 3);
 
+  const [exportStatus, setExportStatus] = useState<'idle' | 'exporting' | 'exported' | 'error'>('idle');
+
   const handleDownloadSurveillanceReport = () => {
+    setExportStatus('exporting');
     try {
       const doc = new jsPDF();
       const margin = 20;
@@ -52,7 +55,7 @@ export const CommunityRadar: React.FC = () => {
 
       doc.setFontSize(20);
       doc.setTextColor(19, 78, 74);
-      doc.text("DermAl Community Surveillance Report", margin, y);
+      doc.text("DermAI Community Surveillance Report", margin, y);
       
       y += 10;
       doc.setFontSize(10);
@@ -121,12 +124,15 @@ export const CommunityRadar: React.FC = () => {
       y = 280;
       doc.setFontSize(8);
       doc.setTextColor(150);
-      doc.text("DermAl Epidemiological Edge Surveillance · For Authorized Public Health Personnel Only", margin, y);
+      doc.text("DermAI Epidemiological Edge Surveillance · For Authorized Public Health Personnel Only", margin, y);
 
-      doc.save(`DermAl_Surveillance_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`DermAI_Surveillance_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+      setExportStatus('exported');
+      setTimeout(() => setExportStatus('idle'), 3000);
     } catch (e) {
-      console.error("Surveillance PDF error", e);
-      alert("Failed to export PDF report.");
+      console.warn("Surveillance PDF error note:", e);
+      setExportStatus('error');
+      setTimeout(() => setExportStatus('idle'), 4000);
     }
   };
 
@@ -229,10 +235,26 @@ export const CommunityRadar: React.FC = () => {
           <button 
             type="button"
             onClick={handleDownloadSurveillanceReport}
-            className="w-full py-5 text-sm font-bold text-clinical-primary border border-clinical-primary/20 rounded-[2rem] hover:bg-clinical-primary hover:text-white transition-all active:scale-95 flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
+            disabled={exportStatus === 'exporting'}
+            className={cn(
+              "w-full py-5 text-sm font-bold rounded-[2rem] transition-all active:scale-95 flex items-center justify-center space-x-2 cursor-pointer shadow-2xs border",
+              exportStatus === 'exported'
+                ? "bg-green-50 text-green-700 border-green-300"
+                : exportStatus === 'error'
+                ? "bg-red-50 text-red-700 border-red-300"
+                : "text-clinical-primary border-clinical-primary/20 hover:bg-clinical-primary hover:text-white"
+            )}
           >
-            <FileDown size={18} />
-            <span>Download Surveillance PDF</span>
+            <FileDown size={18} className={exportStatus === 'exporting' ? 'animate-bounce' : ''} />
+            <span>
+              {exportStatus === 'exporting'
+                ? 'Exporting PDF Report...'
+                : exportStatus === 'exported'
+                ? 'Surveillance PDF Exported!'
+                : exportStatus === 'error'
+                ? 'Export Failed'
+                : 'Download Surveillance PDF'}
+            </span>
           </button>
         </div>
       </div>

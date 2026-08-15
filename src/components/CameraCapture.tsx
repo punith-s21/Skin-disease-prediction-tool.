@@ -21,16 +21,16 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture }) => {
         let width = img.width;
         let height = img.height;
 
-        // Max dimensions 1200px
+        // Max dimensions 1200px for high-definition dermatology diagnostic precision
         const MAX_DIM = 1200;
         if (width > height) {
           if (width > MAX_DIM) {
-            height *= MAX_DIM / width;
+            height = Math.round(height * (MAX_DIM / width));
             width = MAX_DIM;
           }
         } else {
           if (height > MAX_DIM) {
-            width *= MAX_DIM / height;
+            width = Math.round(width * (MAX_DIM / height));
             height = MAX_DIM;
           }
         }
@@ -38,10 +38,14 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture }) => {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+        }
         
-        // Compress to 0.7 quality should keep it around 100-300kb
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        // High fidelity quality (0.88) preserves fine scaling, borders, and color variations
+        resolve(canvas.toDataURL('image/jpeg', 0.88));
       };
       img.src = dataUrl;
     });

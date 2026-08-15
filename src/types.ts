@@ -63,7 +63,7 @@ export interface UserProfile {
   registeredAt: string;
   lastLoginAt?: string;
   predictionsCount?: number;
-  role?: 'Admin' | 'Clinic Worker' | 'Dermatologist';
+  role?: 'Admin' | 'Clinic Worker' | 'Dermatologist' | 'User';
 }
 
 export type DateRangeOption = '7d' | '30d' | '90d' | 'ytd' | 'all';
