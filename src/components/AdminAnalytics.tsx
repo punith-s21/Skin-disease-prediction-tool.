@@ -376,32 +376,23 @@ export const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ user, onBackToAp
     }
     setIsAuthLoading(true);
     try {
-      const loggedUser = await signInWithEmail(loginEmail, loginPassword);
-      const isVirtual = (loggedUser as any)?.isVirtualAdmin;
-      setAuthSuccess(`Successfully authenticated as ${loggedUser.email || 'Admin'}${isVirtual ? ' (Demo Mode)' : ''}!`);
+      const loggedUser = await signInWithEmail(loginEmail, loginPassword, 'Admin', 'Director of Epidemic Surveillance (Admin)');
+      setAuthSuccess(`Successfully authenticated as ${loggedUser.email || 'Admin'}!`);
       window.dispatchEvent(new Event('storage'));
       setTimeout(() => {
         setIsAuthModalOpen(false);
         setAuthSuccess('');
-      }, 1000);
+      }, 700);
     } catch (err: any) {
       console.error('Email login error:', err);
       if (err.code === 'auth/invalid-email') {
         setAuthError('Invalid email format.');
-      } else if (err.code === 'auth/wrong-password') {
-        setAuthError('Incorrect password. Please verify administrative credentials.');
       } else {
         setAuthError(err.message || 'Authentication failed. Please verify credentials.');
       }
     } finally {
       setIsAuthLoading(false);
     }
-  };
-
-  const handleQuickFillAdmin = () => {
-    setLoginEmail('admin@dermai.org');
-    setLoginPassword('AdminPassword123!');
-    setAuthError('');
   };
 
   const handleAddUser = async (e: React.FormEvent) => {

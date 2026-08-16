@@ -214,7 +214,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'predictions', predId), {
         id: predId,
-        userId: user ? user.uid : (userSession?.id || 'anon_worker'),
+        userId: user ? user.uid : (userSession?.uid || 'anon_worker'),
         userEmail: user?.email || (userSession?.email || 'Clinic Anonymous'),
         condition: newAnalysis.condition,
         probability: newAnalysis.probability,

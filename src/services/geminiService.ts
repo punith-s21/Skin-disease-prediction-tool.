@@ -9,12 +9,13 @@ export async function analyzeSkinCondition(
 ): Promise<Analysis> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 28000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     const response = await fetch("/api/analyze", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
       },
       signal: controller.signal,
       body: JSON.stringify({
@@ -28,7 +29,8 @@ export async function analyzeSkinCondition(
 
     clearTimeout(timeoutId);
 
-    if (response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    if (response.ok && contentType.includes("application/json")) {
       const json = await response.json();
       if (json.success && json.data) {
         return {
@@ -37,12 +39,12 @@ export async function analyzeSkinCondition(
           recommendation: json.data.recommendation || "- Maintain skin barrier hygiene with clean water and gentle soap.\n- Avoid scratching, rubbing, or harsh chemicals.\n- Consult Primary Health Center (PHC) if redness or symptoms persist.",
           severity: (json.data.severity as Severity) || Severity.MODERATE,
           localization: json.data.localization || "Dermal Area",
-          features: Array.isArray(json.data.features) ? json.data.features : ["Focal dermal presentation", "Melanin-adapted pattern"]
+          features: Array.isArray(json.data.features) && json.data.features.length > 0 ? json.data.features : ["Focal dermal presentation", "Melanin-adapted pattern"]
         };
       }
     }
   } catch (netErr: any) {
-    console.warn("AI Analysis offline fallback activated:", netErr?.message || netErr);
+    console.warn("AI Analysis serverless/network fallback activated:", netErr?.message || netErr);
   }
 
   // Robust Client-Side Heuristic Fallback (HAM10000 / Fitzpatrick 17k taxonomy)
@@ -50,6 +52,7 @@ export async function analyzeSkinCondition(
   let condition = "Atopic Dermatitis / Eczema (ಚರ್ಮದ ಉರಿಯೂತ)";
   let severity = Severity.MODERATE;
   let probability = 0.87;
+  let localization = "Flexural / Epidermal Area";
   let features = [
     "Maculopapular hyperpigmentation",
     "Epidermal induration (thickening)",
@@ -61,26 +64,29 @@ export async function analyzeSkinCondition(
     condition = "Tinea Corporis / Ringworm (ತಾಮರೆ ರೋಗ)";
     severity = Severity.MODERATE;
     probability = 0.92;
+    localization = "Trunk / Upper Extremity";
     features = [
       "Annular erythematous border with central clearing",
       "Peripheral active micro-vesiculation",
       "Hyperpigmented border on melanin-rich skin",
       "Follicular scaling without deep ulceration"
     ];
-  } else if (descLower.includes("white") || descLower.includes("vitiligo") || descLower.includes("patch") || descLower.includes("depigment")) {
+  } else if (descLower.includes("white") || descLower.includes("vitiligo") || descLower.includes("patch") || descLower.includes("depigment") || descLower.includes("pale")) {
     condition = "Vitiligo / Leukoderma (ತೊನ್ನು ರೋಗ)";
     severity = Severity.LOW;
     probability = 0.94;
+    localization = "Dorsum of Hands / Periorificial Area";
     features = [
       "Well-demarcated chalky white macules",
       "Absence of scale or epidermal crusting",
       "Loss of melanocyte activity in epidermal basal layer",
       "Wood lamp fluorescence pattern"
     ];
-  } else if (descLower.includes("pus") || descLower.includes("blister") || descLower.includes("pain") || descLower.includes("sore")) {
+  } else if (descLower.includes("pus") || descLower.includes("blister") || descLower.includes("pain") || descLower.includes("sore") || descLower.includes("wound")) {
     condition = "Impetigo / Bacterial Pyoderma (ಕೀವು ಗುಳ್ಳೆಗಳು)";
     severity = Severity.HIGH;
     probability = 0.91;
+    localization = "Perinasal / Perioral Area";
     features = [
       "Golden-yellow crusting with exudate",
       "Violaceous inflammatory halo",
@@ -91,16 +97,18 @@ export async function analyzeSkinCondition(
     condition = "Plaque Psoriasis (ಸೊರಿಯಾಸಿಸ್)";
     severity = Severity.MODERATE;
     probability = 0.91;
+    localization = "Extensor Elbows / Knees";
     features = [
       "Sharply circumscribed erythematous/violaceous plaques",
       "Adherent silvery micaceous scaling",
       "Auspitz sign propensity",
       "Extensor surface predilection"
     ];
-  } else if (descLower.includes("dark") || descLower.includes("spot") || descLower.includes("mole") || descLower.includes("black")) {
+  } else if (descLower.includes("dark") || descLower.includes("spot") || descLower.includes("mole") || descLower.includes("black") || descLower.includes("pigment")) {
     condition = "Post-Inflammatory Hyperpigmentation (ಕಪ್ಪು ಕಲೆಗಳು)";
     severity = Severity.LOW;
     probability = 0.89;
+    localization = "Facial / Sun-Exposed Area";
     features = [
       "Well-demarcated melanocytic hyperpigmentation",
       "Intact skin texture without induration",
@@ -114,7 +122,7 @@ export async function analyzeSkinCondition(
     probability,
     recommendation: `- Wash the affected area gently with clean water twice daily.\n- Avoid aggressive scrubbing, picking, or applying unverified pastes.\n- Apply a light protective emollient or petroleum jelly to maintain skin moisture.\n- If symptoms spread, become painful, or do not improve within 48 hours, seek evaluation at the nearest PHC.`,
     severity,
-    localization: "Primary Presentation Area",
+    localization,
     features
   };
 }

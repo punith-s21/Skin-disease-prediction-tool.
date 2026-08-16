@@ -134,35 +134,28 @@ export async function signInWithEmail(
   // Format email if username was entered without domain
   const cleanEmail = cleanInput.includes('@') ? cleanInput : `${cleanInput}@clinic.gov.in`;
 
-  // 1. Check Admin Portal Credentials
-  // Allow admin clearance for admin@dermai.org or username 'admin'
-  if (role === 'Admin' || cleanInput === 'admin@dermai.org' || cleanInput === 'admin') {
-    const validAdminPass = [
-      'AdminPassword123!',
-      'AdminPassword123',
-      'admin123',
-      'Admin123!',
-      'admin',
-      'adminpassword'
-    ];
-    if (cleanEmail === 'admin@dermai.org' || cleanInput === 'admin') {
-      if (validAdminPass.includes(cleanPass)) {
-        const adminSession: AppUserSession = {
-          uid: 'admin_sys_master',
-          email: 'admin@dermai.org',
-          displayName: displayName || 'Director of Epidemiology (System Admin)',
-          role: 'Admin',
-          isVirtualAdmin: true
-        };
-        setActiveUserSession(adminSession);
-        return {
-          uid: 'admin_sys_master',
-          email: 'admin@dermai.org',
-          displayName: displayName || 'Director of Epidemiology (System Admin)',
-          role: 'Admin'
-        };
-      }
-      throw new Error("Incorrect admin password. Please try AdminPassword123!");
+  // 1. Check Admin Portal Credentials (Strict, unique admin credentials)
+  if (role === 'Admin' || cleanEmail === 'admin.surveillance@dermai.org' || cleanInput === 'admin@dermai.org') {
+    const validAdminEmail = 'admin.surveillance@dermai.org';
+    const validAdminPass = 'DermAI#Surveillance2026!';
+
+    if (cleanEmail === validAdminEmail && cleanPass === validAdminPass) {
+      const adminSession: AppUserSession = {
+        uid: 'admin_sys_surveillance_master',
+        email: 'admin.surveillance@dermai.org',
+        displayName: 'Director of Epidemic Surveillance (Admin)',
+        role: 'Admin',
+        isVirtualAdmin: true
+      };
+      setActiveUserSession(adminSession);
+      return {
+        uid: 'admin_sys_surveillance_master',
+        email: 'admin.surveillance@dermai.org',
+        displayName: 'Director of Epidemic Surveillance (Admin)',
+        role: 'Admin'
+      };
+    } else {
+      throw new Error("Invalid admin credentials. Access is strictly restricted to authorized surveillance administrators.");
     }
   }
 
